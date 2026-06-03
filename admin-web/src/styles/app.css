@@ -1,0 +1,33 @@
+.app-shell {
+  min-height: 100dvh;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.app-layout {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: 1fr;
+}
+
+.icon-md {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.icon-sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (min-width: 1024px) {
+  .app-layout {
+    grid-template-columns: 176px minmax(0, 1fr);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,58 @@
+global:
+  imagePullPolicy: IfNotPresent
+  domain: llm-gateway.local
+
+gateway:
+  image: llm-gateway/pingora-gateway:local
+  replicas: 1
+  secret:
+    openaiApiKey: ""
+    internalApiKeys: local-internal-key
+    internalApiKeyHashes: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+
+adminApi:
+  image: llm-gateway/admin-api:local
+  replicas: 1
+  env:
+    DATABASE_MAX_CONNECTIONS: "5"
+    DATABASE_AUTO_MIGRATE: "true"
+  secret:
+    jwtSecret: local-dev-secret-change-me
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+adminWeb:
+  image: llm-gateway/admin-web:local
+  replicas: 1
+
+redis:
+  mode: local
+  urlSecretName: llm-gateway-secret
+  urlSecretKey: REDIS_URL
+
+database:
+  mode: local
+  urlSecretName: llm-gateway-secret
+  urlSecretKey: DATABASE_URL
+
+ingress:
+  enabled: false
+  tls:
+    enabled: false
+
+serviceMonitor:
+  enabled: false

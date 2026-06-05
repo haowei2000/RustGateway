@@ -1,0 +1,16 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: pingora-gateway
+spec:
+  selector:
+    app: pingora-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+{{- end }}

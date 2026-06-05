@@ -1,5 +1,7 @@
 import { Plus } from "lucide-react"
 
+import { Item, ItemDetail, ItemEyebrow, ItemMeta, ItemTitle } from "@/components/ui/item"
+
 export type ItemListItem = {
   eyebrow?: string
   id: string
@@ -52,23 +54,20 @@ function ItemList({
           const isSelected = selectedItemId === item.id
 
           return (
-            <button
+            <Item
               key={item.id}
               aria-current={isSelected ? "true" : undefined}
-              className={isSelected ? "item-list-row selected" : "item-list-row"}
-              type="button"
+              selected={isSelected}
               onClick={() => onSelect(item.id)}
             >
-              <span className="item-list-row-title">{item.title}</span>
+              <ItemTitle>{item.title}</ItemTitle>
               {item.eyebrow || item.meta ? (
-                <span className="item-list-row-detail">
-                  {item.eyebrow ? (
-                    <span className="item-list-row-eyebrow">{item.eyebrow}</span>
-                  ) : null}
-                  {item.meta ? <span className="item-list-row-meta">{item.meta}</span> : null}
-                </span>
+                <ItemDetail>
+                  {item.eyebrow ? <ItemEyebrow>{item.eyebrow}</ItemEyebrow> : null}
+                  {item.meta ? <ItemMeta>{item.meta}</ItemMeta> : null}
+                </ItemDetail>
               ) : null}
-            </button>
+            </Item>
           )
         })}
       </div>

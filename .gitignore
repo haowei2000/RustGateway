@@ -1,0 +1,8 @@
+/target/
+/admin-web/node_modules/
+/admin-web/dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log

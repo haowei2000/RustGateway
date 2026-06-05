@@ -14,12 +14,11 @@ import {
 } from "@/components/ui/table"
 import type {
   AdminData,
-  ApiKeyModelConfig,
-  ApiKeyModelSource,
+  ApiKeyMappingPolicy,
   ApiKeySummary,
-  EpichustModel,
-  ResourceStatus,
+  MappingPolicy,
 } from "@/lib/api"
+import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
 import {
   DangerAction,
@@ -44,14 +43,30 @@ type ApiKeyPageProps = {
 }
 
 type ApiKeyDraft = {
-  modelConfigs: ApiKeyModelConfig[]
-  name: string
-  status: ResourceStatus
+  enabled: boolean
+  key_name: string
+  mappingPolicies: ApiKeyMappingPolicy[]
+}
+
+function attachablePolicies(data: AdminData, draft: ApiKeyDraft): MappingPolicy[] {
+  const attachedIds = new Set(draft.mappingPolicies.map((mp) => mp.mapping_policy_id))
+  return data.policies.filter((policy) => !attachedIds.has(policy.id))
 }
 
 function ApiKeyPage({ data, isFetching, selectedItemId, onRefresh }: ApiKeyPageProps) {
   if (!data) {
     return <EmptyResourcePage message="Loading API key details." />
+  }
+
+  if (selectedItemId === NEW_SIDEBAR_ITEM_ID) {
+    return (
+      <ApiKeyPageContent
+        key="new-api-key"
+        data={data}
+        isFetching={isFetching}
+        onRefresh={onRefresh}
+      />
+    )
   }
 
   const item = getSelectedItem(data.apiKeys, selectedItemId)
@@ -78,289 +93,198 @@ function ApiKeyPageContent({
 }: {
   data: AdminData
   isFetching: boolean
-  item: ApiKeySummary
+  item?: ApiKeySummary
   onRefresh: () => void
 }) {
   const [draft, setDraft] = useState<ApiKeyDraft>(() => createApiKeyDraft(item))
-  const [editingModelId, setEditingModelId] = useState("")
-  const [modelToAddId, setModelToAddId] = useState("")
+  const [editingPolicyId, setEditingPolicyId] = useState("")
+  const [policyToAddId, setPolicyToAddId] = useState("")
   const [notice, setNotice] = useState("")
 
-  const availableModels = data.models.filter(
-    (model) => !draft.modelConfigs.some((config) => config.epichust_model_id === model.id),
+  const availablePolicies = attachablePolicies(data, draft)
+  const effectivePolicyToAddId =
+    policyToAddId || availablePolicies[0]?.id || ""
+  const routeCount = draft.mappingPolicies.reduce(
+    (count, mp) => count + mp.routes.length,
+    0,
   )
-  const effectiveModelToAddId = modelToAddId || availableModels[0]?.id || ""
 
-  function updateConfig(modelId: string, patch: Partial<ApiKeyModelConfig>) {
+  function addMappingPolicy() {
+    const policy = data.policies.find(
+      (candidate) => candidate.id === effectivePolicyToAddId,
+    )
+    if (!policy) return
+
+    const mp: ApiKeyMappingPolicy = {
+      enabled: true,
+      epichust_model_id: policy.epichust_model_id,
+      epichust_model_name: policy.epichust_model_name,
+      mapping_policy_id: policy.id,
+      routing_strategy: policy.routing_strategy,
+      usage_limit_type: policy.usage_limit_type,
+      usage_limit_value: policy.usage_limit_value,
+      routes: policy.routes.map((route) => ({ ...route })),
+    }
+
     setDraft((current) => ({
       ...current,
-      modelConfigs: current.modelConfigs.map((config) =>
-        config.epichust_model_id === modelId ? { ...config, ...patch } : config,
+      mappingPolicies: [...current.mappingPolicies, mp],
+    }))
+    setPolicyToAddId("")
+    setNotice("Mapping policy added to the local draft.")
+  }
+
+  function removeMappingPolicy(policyId: string) {
+    setDraft((current) => ({
+      ...current,
+      mappingPolicies: current.mappingPolicies.filter(
+        (mp) => mp.mapping_policy_id !== policyId,
       ),
     }))
-  }
-
-  function updateConfigModel(currentModelId: string, nextModelId: string) {
-    const nextModel = data.models.find((model) => model.id === nextModelId)
-    if (!nextModel) return
-
-    updateConfig(currentModelId, {
-      epichust_model_id: nextModel.id,
-      epichust_model_name: nextModel.model_name,
-      max_tokens_per_request: nextModel.default_max_tokens,
-      sources: getSourcesForModel(nextModel.id, data),
-    })
-    setEditingModelId(nextModel.id)
-  }
-
-  function updatePrimarySource(modelId: string, mappingId: string) {
-    setDraft((current) => ({
-      ...current,
-      modelConfigs: current.modelConfigs.map((config) => {
-        if (config.epichust_model_id !== modelId) return config
-
-        const nextPrimary = config.sources.find((source) => source.mapping_id === mappingId)
-        if (!nextPrimary) return config
-
-        return {
-          ...config,
-          sources: [
-            nextPrimary,
-            ...config.sources.filter((source) => source.mapping_id !== mappingId),
-          ],
-        }
-      }),
-    }))
-  }
-
-  function updatePrimarySourceWeight(modelId: string, weight: number) {
-    setDraft((current) => ({
-      ...current,
-      modelConfigs: current.modelConfigs.map((config) => {
-        if (config.epichust_model_id !== modelId || config.sources.length === 0) return config
-
-        const [primarySource, ...otherSources] = config.sources
-        return {
-          ...config,
-          sources: [{ ...primarySource, weight }, ...otherSources],
-        }
-      }),
-    }))
-  }
-
-  function addModelConfig() {
-    const model = data.models.find((candidate) => candidate.id === effectiveModelToAddId)
-    if (!model) return
-
-    setDraft((current) => ({
-      ...current,
-      modelConfigs: [...current.modelConfigs, createApiKeyModelConfig(model, data)],
-    }))
-    setEditingModelId(model.id)
-    setModelToAddId("")
-    setNotice("Model access added to the local draft.")
-  }
-
-  function removeModelConfig(modelId: string) {
-    setDraft((current) => ({
-      ...current,
-      modelConfigs: current.modelConfigs.filter((config) => config.epichust_model_id !== modelId),
-    }))
-    setEditingModelId("")
-    setNotice("Model access removed from the local draft.")
+    setEditingPolicyId("")
+    setNotice("Mapping policy removed from the local draft.")
   }
 
   function revokeApiKey() {
-    setDraft((current) => ({ ...current, status: "disabled" }))
+    setDraft((current) => ({ ...current, enabled: false }))
     setNotice("Revoke is queued in the local draft.")
   }
 
   return (
     <ResourcePageFrame variant="key">
       <ResourcePageHeader
-        description={`Hash prefix ${item.key_hash_prefix}`}
+        description={
+          item ? `Hash prefix ${item.key_hash_prefix}` : "New API key draft"
+        }
         icon={KeyRound}
         isFetching={isFetching}
-        isMock={data.isMock}
-        status={draft.status}
-        title={draft.name}
+        status={draft.enabled ? "enabled" : "disabled"}
+        title={draft.key_name || "New API Key"}
         onRefresh={onRefresh}
       />
 
       <ResourceMetrics
         metrics={[
-          { label: "Models", value: draft.modelConfigs.length },
-          { label: "Requests Today", value: formatNumber(item.total_requests_today) },
-          { label: "Tokens Today", value: formatNumber(item.total_tokens_today) },
-          { label: "Last Used", value: formatDate(item.last_used_at) },
+          { label: "Policies", value: draft.mappingPolicies.length },
+          { label: "Routes", value: formatNumber(routeCount) },
+          {
+            label: "Last Used",
+            value: item ? formatDate(item.last_used_at) : "-",
+          },
+          { label: "Created", value: item ? formatDate(item.created_at) : "-" },
         ]}
       />
 
       <div className="resource-layout resource-layout-key">
-        <ResourceCard className="resource-card-main" title="Model Access">
+        <ResourceCard className="resource-card-main" title="Mapping Policies">
           <ResourceSectionHeader
             actions={
               <>
                 <select
                   className="resource-select"
-                  disabled={availableModels.length === 0}
-                  value={effectiveModelToAddId}
-                  onChange={(event) => setModelToAddId(event.target.value)}
+                  disabled={availablePolicies.length === 0}
+                  value={effectivePolicyToAddId}
+                  onChange={(event) =>
+                    setPolicyToAddId(event.target.value)
+                  }
                 >
-                  {availableModels.length > 0 ? (
-                    availableModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.model_name}
+                  {availablePolicies.length > 0 ? (
+                    availablePolicies.map((policy) => (
+                      <option key={policy.id} value={policy.id}>
+                        {policy.epichust_model_name} ({policy.routing_strategy})
                       </option>
                     ))
                   ) : (
-                    <option value="">All models added</option>
+                    <option value="">All policies attached</option>
                   )}
                 </select>
                 <Button
-                  disabled={!effectiveModelToAddId}
+                  disabled={!effectivePolicyToAddId}
                   type="button"
                   variant="outline"
-                  onClick={addModelConfig}
+                  onClick={addMappingPolicy}
                 >
                   <Plus className="icon-sm" aria-hidden="true" />
-                  Add model
+                  Add policy
                 </Button>
               </>
             }
-            title="Per-model limits and routing"
+            title="Attached mapping policies"
           />
 
-          {draft.modelConfigs.length > 0 ? (
+          {draft.mappingPolicies.length > 0 ? (
             <Table className="resource-inline-table resource-key-table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Model</TableHead>
-                  <TableHead>Rate / min</TableHead>
-                  <TableHead>Request tokens</TableHead>
-                  <TableHead>Day tokens</TableHead>
-                  <TableHead>Routing source</TableHead>
-                  <TableHead>Weight</TableHead>
+                  <TableHead>Strategy</TableHead>
+                  <TableHead>Routes</TableHead>
+                  <TableHead>Usage limit</TableHead>
+                  <TableHead>Enabled</TableHead>
                   <TableHead className="resource-actions-cell">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {draft.modelConfigs.map((config) => {
-                  const isEditing = editingModelId === config.epichust_model_id
-                  const primarySource = config.sources[0]
+                {draft.mappingPolicies.map((mp) => {
+                  const isEditing = editingPolicyId === mp.mapping_policy_id
 
                   return (
-                    <TableRow key={config.epichust_model_id}>
+                    <TableRow key={mp.mapping_policy_id}>
                       <TableCell>
-                        <select
-                          className="resource-select resource-select-compact"
-                          disabled={!isEditing}
-                          value={config.epichust_model_id}
-                          onChange={(event) =>
-                            updateConfigModel(config.epichust_model_id, event.target.value)
+                        <span className="resource-field-label">
+                          {mp.epichust_model_name}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="resource-strategy-badge">
+                          {mp.routing_strategy}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {mp.routes.length > 0 ? (
+                          <ul className="resource-route-list">
+                            {mp.routes.map((route) => (
+                              <li key={route.provider_model_id}>
+                                {route.provider_name} / {route.provider_model_name}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="resource-muted-text">No routes</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {mp.usage_limit_type ? (
+                          <span>
+                            {mp.usage_limit_type}: {mp.usage_limit_value}
+                          </span>
+                        ) : (
+                          <span className="resource-muted-text">Unlimited</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={
+                            mp.enabled
+                              ? "resource-status-ok"
+                              : "resource-status-off"
                           }
                         >
-                          {data.models.map((model) => (
-                            <option
-                              key={model.id}
-                              disabled={draft.modelConfigs.some(
-                                (existingConfig) =>
-                                  existingConfig.epichust_model_id === model.id &&
-                                  existingConfig.epichust_model_id !== config.epichust_model_id,
-                              )}
-                              value={model.id}
-                            >
-                              {model.model_name}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="resource-number-input"
-                          disabled={!isEditing}
-                          min={0}
-                          type="number"
-                          value={config.rate_limit_per_minute}
-                          onChange={(event) =>
-                            updateConfig(config.epichust_model_id, {
-                              rate_limit_per_minute: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="resource-number-input"
-                          disabled={!isEditing}
-                          min={1}
-                          type="number"
-                          value={config.max_tokens_per_request}
-                          onChange={(event) =>
-                            updateConfig(config.epichust_model_id, {
-                              max_tokens_per_request: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="resource-number-input"
-                          disabled={!isEditing}
-                          min={0}
-                          type="number"
-                          value={config.max_tokens_per_day ?? ""}
-                          onChange={(event) =>
-                            updateConfig(config.epichust_model_id, {
-                              max_tokens_per_day:
-                                event.target.value === "" ? null : Number(event.target.value),
-                            })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          className="resource-select resource-select-compact"
-                          disabled={!isEditing || config.sources.length === 0}
-                          value={primarySource?.mapping_id ?? ""}
-                          onChange={(event) =>
-                            updatePrimarySource(config.epichust_model_id, event.target.value)
-                          }
-                        >
-                          {config.sources.length > 0 ? (
-                            config.sources.map((source) => (
-                              <option key={source.mapping_id} value={source.mapping_id}>
-                                {source.provider_name} / {source.supplier_model_name}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="">No source</option>
-                          )}
-                        </select>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="resource-number-input"
-                          disabled={!isEditing || !primarySource}
-                          min={0}
-                          type="number"
-                          value={primarySource?.weight ?? 0}
-                          onChange={(event) =>
-                            updatePrimarySourceWeight(
-                              config.epichust_model_id,
-                              Number(event.target.value),
-                            )
-                          }
-                        />
+                          {String(mp.enabled)}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <ResourceActions>
                           <Button
                             size="sm"
                             type="button"
-                            variant={isEditing ? "secondary" : "outline"}
+                            variant={
+                              isEditing ? "secondary" : "outline"
+                            }
                             onClick={() =>
-                              setEditingModelId(isEditing ? "" : config.epichust_model_id)
+                              setEditingPolicyId(
+                                isEditing ? "" : mp.mapping_policy_id,
+                              )
                             }
                           >
                             {isEditing ? (
@@ -374,7 +298,9 @@ function ApiKeyPageContent({
                             size="sm"
                             type="button"
                             variant="ghost"
-                            onClick={() => removeModelConfig(config.epichust_model_id)}
+                            onClick={() =>
+                              removeMappingPolicy(mp.mapping_policy_id)
+                            }
                           >
                             Remove
                           </Button>
@@ -386,7 +312,7 @@ function ApiKeyPageContent({
               </TableBody>
             </Table>
           ) : (
-            <EmptyBlock>No model access configured.</EmptyBlock>
+            <EmptyBlock>No mapping policies attached.</EmptyBlock>
           )}
         </ResourceCard>
 
@@ -397,52 +323,63 @@ function ApiKeyPageContent({
                 <Label htmlFor="api-key-name">Name</Label>
                 <Input
                   id="api-key-name"
-                  value={draft.name}
+                  value={draft.key_name}
                   onChange={(event) =>
-                    setDraft((current) => ({ ...current, name: event.target.value }))
+                    setDraft((current) => ({
+                      ...current,
+                      key_name: event.target.value,
+                    }))
                   }
                 />
               </div>
               <div className="resource-field">
-                <Label htmlFor="api-key-status">Status</Label>
+                <Label htmlFor="api-key-enabled">Enabled</Label>
                 <select
-                  id="api-key-status"
+                  id="api-key-enabled"
                   className="resource-select"
-                  value={draft.status}
+                  value={draft.enabled ? "true" : "false"}
                   onChange={(event) =>
                     setDraft((current) => ({
                       ...current,
-                      status: event.target.value as ResourceStatus,
+                      enabled: event.target.value === "true",
                     }))
                   }
                 >
-                  <option value="active">active</option>
-                  <option value="disabled">disabled</option>
+                  <option value="true">true</option>
+                  <option value="false">false</option>
                 </select>
               </div>
-              <ReadOnlyField label="Hash prefix" value={item.key_hash_prefix} />
-              <ReadOnlyField label="ID" value={item.id} />
-              <ReadOnlyField label="Created" value={formatDate(item.created_at)} />
+              {item ? (
+                <>
+                  <ReadOnlyField label="Hash prefix" value={item.key_hash_prefix} />
+                  <ReadOnlyField label="ID" value={item.id} />
+                  <ReadOnlyField label="Created" value={formatDate(item.created_at)} />
+                </>
+              ) : (
+                <ReadOnlyField label="Mode" value="New draft" />
+              )}
             </div>
           </ResourceCard>
 
-          <DangerAction
-            action={
-              <Button
-                className="resource-danger-button"
-                disabled={draft.status === "disabled"}
-                type="button"
-                variant="outline"
-                onClick={revokeApiKey}
-              >
-                <Ban className="icon-sm" aria-hidden="true" />
-                Revoke
-              </Button>
-            }
-            badge="special action"
-            description="Status changes to disabled in the current draft."
-            title="Revoke API key"
-          />
+          {item ? (
+            <DangerAction
+              action={
+                <Button
+                  className="resource-danger-button"
+                  disabled={!draft.enabled}
+                  type="button"
+                  variant="outline"
+                  onClick={revokeApiKey}
+                >
+                  <Ban className="icon-sm" aria-hidden="true" />
+                  Revoke
+                </Button>
+              }
+              badge="special action"
+              description="Enabled changes to false in the current draft."
+              title="Revoke API key"
+            />
+          ) : null}
 
           <ResourceActions>
             <Button
@@ -450,14 +387,17 @@ function ApiKeyPageContent({
               variant="outline"
               onClick={() => {
                 setDraft(createApiKeyDraft(item))
-                setEditingModelId("")
+                setEditingPolicyId("")
                 setNotice("Draft reset.")
               }}
             >
               <RotateCcw className="icon-sm" aria-hidden="true" />
               Reset
             </Button>
-            <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
+            <Button
+              type="button"
+              onClick={() => setNotice("Draft staged locally.")}
+            >
               <Save className="icon-sm" aria-hidden="true" />
               Save draft
             </Button>
@@ -470,41 +410,23 @@ function ApiKeyPageContent({
   )
 }
 
-function createApiKeyDraft(item: ApiKeySummary): ApiKeyDraft {
+function createApiKeyDraft(item?: ApiKeySummary): ApiKeyDraft {
+  if (!item) {
+    return {
+      enabled: true,
+      key_name: "",
+      mappingPolicies: [],
+    }
+  }
+
   return {
-    modelConfigs: item.model_configs.map((config) => ({
-      ...config,
-      sources: config.sources.map((source) => ({ ...source })),
+    enabled: item.enabled,
+    key_name: item.key_name,
+    mappingPolicies: item.mapping_policies.map((mp) => ({
+      ...mp,
+      routes: mp.routes.map((route) => ({ ...route })),
     })),
-    name: item.name,
-    status: item.status,
   }
-}
-
-function createApiKeyModelConfig(model: EpichustModel, data: AdminData): ApiKeyModelConfig {
-  return {
-    epichust_model_id: model.id,
-    epichust_model_name: model.model_name,
-    max_tokens_per_day: null,
-    max_tokens_per_request: model.default_max_tokens,
-    rate_limit_per_minute: 60,
-    request_count_today: 0,
-    sources: getSourcesForModel(model.id, data),
-    used_tokens_today: 0,
-  }
-}
-
-function getSourcesForModel(modelId: string, data: AdminData): ApiKeyModelSource[] {
-  return data.mappings
-    .filter((mapping) => mapping.enabled && mapping.epichust_model_id === modelId)
-    .map((mapping) => ({
-      mapping_id: mapping.id,
-      priority: mapping.priority,
-      provider_id: mapping.provider_id,
-      provider_name: mapping.provider_name,
-      supplier_model_name: mapping.supplier_model_name,
-      weight: 100,
-    }))
 }
 
 export { ApiKeyPage }

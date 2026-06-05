@@ -4,7 +4,6 @@ import { RefreshCw, type LucideIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { ResourceStatus } from "@/lib/api"
 
 type ResourcePageFrameProps = {
   children: ReactNode
@@ -19,8 +18,7 @@ type ResourcePageHeaderProps = {
   description: string
   icon: LucideIcon
   isFetching: boolean
-  isMock?: boolean
-  status?: ResourceStatus
+  status?: string
   title: string
   onRefresh: () => void
 }
@@ -29,7 +27,6 @@ function ResourcePageHeader({
   description,
   icon: Icon,
   isFetching,
-  isMock,
   status,
   title,
   onRefresh,
@@ -45,10 +42,7 @@ function ResourcePageHeader({
             <div className="resource-title-group">
               <div className="resource-title-row">
                 <CardTitle className="resource-title">{title}</CardTitle>
-                {status ? (
-                  <Badge variant={status === "active" ? "success" : "secondary"}>{status}</Badge>
-                ) : null}
-                {isMock ? <Badge variant="warning">demo data</Badge> : null}
+                {status ? <Badge variant={status === "enabled" ? "success" : "secondary"}>{status}</Badge> : null}
               </div>
               <p className="resource-description">{description}</p>
             </div>

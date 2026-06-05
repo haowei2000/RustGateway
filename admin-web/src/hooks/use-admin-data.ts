@@ -4,9 +4,11 @@ import {
   createApiKey,
   createEpichustModel,
   createProvider,
+  createProviderModel,
   getAdminData,
   type CreateApiKeyRequest,
   type CreateEpichustModelRequest,
+  type CreateProviderModelRequest,
   type CreateProviderRequest,
 } from "@/lib/api"
 
@@ -35,6 +37,17 @@ export function useCreateProvider() {
 
   return useMutation({
     mutationFn: (input: CreateProviderRequest) => createProvider(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useCreateProviderModel() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: CreateProviderModelRequest) => createProviderModel(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
     },

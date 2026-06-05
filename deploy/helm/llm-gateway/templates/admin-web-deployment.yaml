@@ -1,0 +1,29 @@
+{{- if .Values.adminWeb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-web
+spec:
+  replicas: {{ .Values.adminWeb.replicas }}
+  selector:
+    matchLabels:
+      app: admin-web
+  template:
+    metadata:
+      labels:
+        app: admin-web
+    spec:
+      containers:
+        - name: admin-web
+          image: {{ .Values.adminWeb.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.adminWeb.containerPort }}
+          readinessProbe:
+            httpGet:
+              path: /admin/
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}

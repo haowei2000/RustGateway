@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-gateway-config
+data:
+  GATEWAY_BIND_ADDR: "0.0.0.0:{{ .Values.gateway.containerPort }}"
+  METRICS_BIND_ADDR: "0.0.0.0:{{ .Values.gateway.metricsPort }}"
+  ADMIN_API_BIND_ADDR: "0.0.0.0:{{ .Values.adminApi.containerPort }}"
+  RUST_LOG: "{{ .Values.gateway.env.RUST_LOG }}"
+  OPENAI_BASE_URL: "{{ .Values.gateway.env.OPENAI_BASE_URL }}"
+  OPENAI_KEY_REF: "{{ .Values.gateway.env.OPENAI_KEY_REF }}"
+  DATABASE_MAX_CONNECTIONS: "{{ .Values.adminApi.env.DATABASE_MAX_CONNECTIONS }}"
+  DATABASE_AUTO_MIGRATE: "{{ .Values.adminApi.env.DATABASE_AUTO_MIGRATE }}"

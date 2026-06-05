@@ -1,102 +1,143 @@
-export type ResourceStatus = "active" | "disabled"
+export type ModelType = "chat_model" | "embedding_model"
+
+export type RoutingStrategy = "weighted" | "priority" | "round_robin"
+
+export type UsageLimitType =
+  | "requests_per_minute"
+  | "requests_per_day"
+  | "tokens_per_minute"
+  | "tokens_per_day"
 
 export type EpichustModel = {
   id: string
   model_name: string
-  model_options: string[]
-  default_max_tokens: number
-  status: ResourceStatus
-  mapped_source_count: number
+  model_type: ModelType
   created_at: string
 }
 
 export type CreateEpichustModelRequest = {
   model_name: string
-  model_options: string[]
-  default_max_tokens: number
+  model_type: ModelType
 }
 
 export type ProviderSummary = {
   id: string
-  name: string
-  base_url: string
-  status: ResourceStatus
-  key_ref: string
-  fetched_model_count: number
-  mapping_count: number
-  last_fetched_at: string | null
+  provider_name: string
+  provider_base_url: string
+  provider_model_count: number
+  policy_count: number
   created_at: string
 }
 
 export type CreateProviderRequest = {
-  name: string
-  base_url: string
-  provider_api_key: string
-  fetch_models: boolean
+  provider_name: string
+  provider_base_url: string
+  provider_key: string
+}
+
+export type CreateProviderResponse = {
+  provider: ProviderSummary
+}
+
+export type AvailableProviderModel = {
+  model_name: string
+  owned_by: string | null
+}
+
+export type ProviderAvailableModelsResponse = {
+  provider_id: string
+  provider_name: string
+  models: AvailableProviderModel[]
 }
 
 export type ProviderModel = {
   id: string
   provider_id: string
-  supplier_model_name: string
-  owned_by: string | null
-  context_window: number | null
-  status: ResourceStatus
-  fetched_at: string
-}
-
-export type CreateProviderResponse = {
-  provider: ProviderSummary
-  fetched_models: ProviderModel[]
-}
-
-export type ModelMapping = {
-  id: string
-  provider_id: string
-  provider_name: string
-  provider_model_id: string
-  supplier_model_name: string
-  epichust_model_id: string
-  epichust_model_name: string
-  priority: number
-  enabled: boolean
+  model_name: string
   created_at: string
 }
 
-export type ApiKeyModelSource = {
-  mapping_id: string
+export type CreateProviderModelRequest = {
   provider_id: string
-  provider_name: string
-  supplier_model_name: string
-  priority: number
-  weight: number
+  model_name: string
 }
 
-export type ApiKeyModelConfig = {
+// ── Mapping Policy ──
+
+export type MappingPolicyRoute = {
+  provider_model_id: string
+  provider_model_name: string
+  provider_id: string
+  provider_name: string
+  weight: number
+  priority: number
+  enabled: boolean
+}
+
+export type MappingPolicyRouteRequest = {
+  provider_model_id: string
+  weight: number
+  priority: number
+  enabled: boolean
+}
+
+export type MappingPolicy = {
+  id: string
   epichust_model_id: string
   epichust_model_name: string
-  sources: ApiKeyModelSource[]
-  rate_limit_per_minute: number
-  max_tokens_per_request: number
-  max_tokens_per_day: number | null
-  used_tokens_today: number
-  request_count_today: number
+  routing_strategy: RoutingStrategy
+  usage_limit_type: UsageLimitType | null
+  usage_limit_value: number | null
+  enabled: boolean
+  routes: MappingPolicyRoute[]
+  created_at: string
+}
+
+export type CreateMappingPolicyRequest = {
+  epichust_model_id: string
+  routing_strategy: RoutingStrategy
+  usage_limit_type: UsageLimitType | null
+  usage_limit_value: number | null
+  routes: MappingPolicyRouteRequest[]
+}
+
+export type UpdateMappingPolicyRequest = {
+  routing_strategy?: RoutingStrategy
+  usage_limit_type?: UsageLimitType | null
+  usage_limit_value?: number | null
+  enabled?: boolean
+  routes?: MappingPolicyRouteRequest[]
+}
+
+// ── API Key ↔ Mapping Policy ──
+
+export type ApiKeyMappingPolicy = {
+  mapping_policy_id: string
+  epichust_model_id: string
+  epichust_model_name: string
+  routing_strategy: RoutingStrategy
+  usage_limit_type: UsageLimitType | null
+  usage_limit_value: number | null
+  enabled: boolean
+  routes: MappingPolicyRoute[]
+}
+
+export type AttachApiKeyMappingPolicyRequest = {
+  mapping_policy_id: string
 }
 
 export type ApiKeySummary = {
   id: string
-  name: string
+  key_name: string
   key_hash_prefix: string
-  status: ResourceStatus
-  model_configs: ApiKeyModelConfig[]
-  total_requests_today: number
-  total_tokens_today: number
+  enabled: boolean
+  mapping_policies: ApiKeyMappingPolicy[]
   last_used_at: string | null
   created_at: string
 }
 
 export type CreateApiKeyRequest = {
-  name: string
+  key_name: string
 }
 
 export type CreateApiKeyResponse = {
@@ -109,7 +150,7 @@ export type AuditLogEntry = {
   api_key_id: string | null
   epichust_model_name: string | null
   provider_id: string | null
-  supplier_model_name: string | null
+  provider_model_name: string | null
   method: string
   path: string
   status_code: number
@@ -122,63 +163,61 @@ export type AdminData = {
   models: EpichustModel[]
   providers: ProviderSummary[]
   providerModels: ProviderModel[]
-  mappings: ModelMapping[]
+  policies: MappingPolicy[]
   apiKeys: ApiKeySummary[]
   auditLogs: AuditLogEntry[]
-  isMock: boolean
 }
 
 const apiBasePath = "/admin-api/v1"
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBasePath}/${path}`)
-  if (!response.ok) {
-    throw new Error(`${path} failed with ${response.status}`)
+async function requestJson<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const init: RequestInit = {
+    method,
+    headers: { "Content-Type": "application/json" },
   }
-
+  if (body !== undefined) {
+    init.body = JSON.stringify(body)
+  }
+  const response = await fetch(`${apiBasePath}/${path}`, init)
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed with ${response.status}`)
+  }
+  if (response.status === 204) {
+    return undefined as T
+  }
   return response.json() as Promise<T>
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  return requestJson<T>("GET", path)
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${apiBasePath}/${path}`, {
-    body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  })
-
-  if (!response.ok) {
-    throw new Error(`${path} failed with ${response.status}`)
-  }
-
-  return response.json() as Promise<T>
+  return requestJson<T>("POST", path, body)
 }
 
 export async function getAdminData(): Promise<AdminData> {
-  try {
-    const [models, providers, providerModels, mappings, apiKeys, auditLogs] = await Promise.all([
+  const [models, providers, providerModels, policies, apiKeys, auditLogs] =
+    await Promise.all([
       getJson<EpichustModel[]>("epichust-models"),
       getJson<ProviderSummary[]>("providers"),
       getJson<ProviderModel[]>("provider-models"),
-      getJson<ModelMapping[]>("model-mappings"),
+      getJson<MappingPolicy[]>("mapping-policies"),
       getJson<ApiKeySummary[]>("api-keys"),
       getJson<AuditLogEntry[]>("audit-logs"),
     ])
 
-    return {
-      models,
-      providers,
-      providerModels,
-      mappings,
-      apiKeys,
-      auditLogs,
-      isMock: false,
-    }
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      return mockAdminData
-    }
-
-    throw error
+  return {
+    models,
+    providers,
+    providerModels,
+    policies,
+    apiKeys,
+    auditLogs,
   }
 }
 
@@ -190,172 +229,59 @@ export function createProvider(input: CreateProviderRequest) {
   return postJson<CreateProviderResponse>("providers", input)
 }
 
+export function getProviderAvailableModels(providerId: string) {
+  return getJson<ProviderAvailableModelsResponse>(
+    `providers/${providerId}/available-models`,
+  )
+}
+
+export function createProviderModel(input: CreateProviderModelRequest) {
+  return postJson<ProviderModel>("provider-models", input)
+}
+
+// ── Mapping Policy API ──
+
+export function createMappingPolicy(input: CreateMappingPolicyRequest) {
+  return postJson<MappingPolicy>("mapping-policies", input)
+}
+
+export function getMappingPolicy(id: string) {
+  return getJson<MappingPolicy>(`mapping-policies/${id}`)
+}
+
+export function updateMappingPolicy(
+  id: string,
+  input: UpdateMappingPolicyRequest,
+) {
+  return requestJson<MappingPolicy>("PUT", `mapping-policies/${id}`, input)
+}
+
+export function deleteMappingPolicy(id: string) {
+  return requestJson<void>("DELETE", `mapping-policies/${id}`)
+}
+
+// ── API Key API ──
+
 export function createApiKey(input: CreateApiKeyRequest) {
   return postJson<CreateApiKeyResponse>("api-keys", input)
 }
 
-const now = new Date().toISOString()
+export function attachApiKeyMappingPolicy(
+  apiKeyId: string,
+  input: AttachApiKeyMappingPolicyRequest,
+) {
+  return postJson<ApiKeyMappingPolicy>(
+    `api-keys/${apiKeyId}/mapping-policies`,
+    input,
+  )
+}
 
-const mockAdminData: AdminData = {
-  isMock: true,
-  models: [
-    {
-      id: "em_chat",
-      model_name: "epichust-chat",
-      model_options: ["chat", "streaming", "json_mode"],
-      default_max_tokens: 8192,
-      status: "active",
-      mapped_source_count: 2,
-      created_at: now,
-    },
-    {
-      id: "em_reasoning",
-      model_name: "epichust-reasoning",
-      model_options: ["chat", "tool_calling"],
-      default_max_tokens: 16384,
-      status: "active",
-      mapped_source_count: 1,
-      created_at: now,
-    },
-  ],
-  providers: [
-    {
-      id: "provider_openai_primary",
-      name: "OpenAI Primary",
-      base_url: "https://api.openai.com",
-      status: "active",
-      key_ref: "keyref_primary",
-      fetched_model_count: 2,
-      mapping_count: 2,
-      last_fetched_at: now,
-      created_at: now,
-    },
-    {
-      id: "provider_backup",
-      name: "Backup Provider",
-      base_url: "https://backup.example.com",
-      status: "active",
-      key_ref: "keyref_backup",
-      fetched_model_count: 1,
-      mapping_count: 1,
-      last_fetched_at: now,
-      created_at: now,
-    },
-  ],
-  providerModels: [
-    {
-      id: "pm_gpt_4o_mini",
-      provider_id: "provider_openai_primary",
-      supplier_model_name: "gpt-4o-mini",
-      owned_by: "openai",
-      context_window: 128000,
-      status: "active",
-      fetched_at: now,
-    },
-    {
-      id: "pm_gpt_4_1",
-      provider_id: "provider_openai_primary",
-      supplier_model_name: "gpt-4.1",
-      owned_by: "openai",
-      context_window: 1000000,
-      status: "active",
-      fetched_at: now,
-    },
-    {
-      id: "pm_backup_chat",
-      provider_id: "provider_backup",
-      supplier_model_name: "backup-chat",
-      owned_by: "backup",
-      context_window: 64000,
-      status: "active",
-      fetched_at: now,
-    },
-  ],
-  mappings: [
-    {
-      id: "map_chat_primary",
-      provider_id: "provider_openai_primary",
-      provider_name: "OpenAI Primary",
-      provider_model_id: "pm_gpt_4o_mini",
-      supplier_model_name: "gpt-4o-mini",
-      epichust_model_id: "em_chat",
-      epichust_model_name: "epichust-chat",
-      priority: 10,
-      enabled: true,
-      created_at: now,
-    },
-    {
-      id: "map_reasoning_primary",
-      provider_id: "provider_openai_primary",
-      provider_name: "OpenAI Primary",
-      provider_model_id: "pm_gpt_4_1",
-      supplier_model_name: "gpt-4.1",
-      epichust_model_id: "em_reasoning",
-      epichust_model_name: "epichust-reasoning",
-      priority: 20,
-      enabled: true,
-      created_at: now,
-    },
-  ],
-  apiKeys: [
-    {
-      id: "key_order_chat",
-      name: "Order Service",
-      key_hash_prefix: "a91c7b44",
-      status: "active",
-      model_configs: [
-        {
-          epichust_model_id: "em_chat",
-          epichust_model_name: "epichust-chat",
-          sources: [
-            {
-              mapping_id: "map_chat_primary",
-              provider_id: "provider_openai_primary",
-              provider_name: "OpenAI Primary",
-              supplier_model_name: "gpt-4o-mini",
-              priority: 10,
-              weight: 100,
-            },
-          ],
-          rate_limit_per_minute: 600,
-          max_tokens_per_request: 8192,
-          max_tokens_per_day: 5000000,
-          used_tokens_today: 240000,
-          request_count_today: 420,
-        },
-      ],
-      total_requests_today: 420,
-      total_tokens_today: 240000,
-      last_used_at: now,
-      created_at: now,
-    },
-  ],
-  auditLogs: [
-    {
-      request_id: "audit_1",
-      api_key_id: "key_order_chat",
-      epichust_model_name: "epichust-chat",
-      provider_id: "provider_openai_primary",
-      supplier_model_name: "gpt-4o-mini",
-      method: "POST",
-      path: "/v1/chat/completions",
-      status_code: 200,
-      latency_ms: 1380,
-      total_tokens: 1240,
-      created_at: now,
-    },
-    {
-      request_id: "audit_2",
-      api_key_id: "key_support",
-      epichust_model_name: "epichust-reasoning",
-      provider_id: "provider_openai_primary",
-      supplier_model_name: "gpt-4.1",
-      method: "POST",
-      path: "/v1/chat/completions",
-      status_code: 429,
-      latency_ms: 12,
-      total_tokens: null,
-      created_at: now,
-    },
-  ],
+export function detachApiKeyMappingPolicy(
+  apiKeyId: string,
+  mappingPolicyId: string,
+) {
+  return requestJson<void>(
+    "DELETE",
+    `api-keys/${apiKeyId}/mapping-policies/${mappingPolicyId}`,
+  )
 }

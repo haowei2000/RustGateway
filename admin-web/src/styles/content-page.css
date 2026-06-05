@@ -1,3 +1,5 @@
+@reference "../index.css";
+
 .content-page {
   min-width: 0;
   padding: 1.25rem 1rem;
@@ -15,7 +17,7 @@
   gap: 0.5rem;
   padding-top: 1.25rem;
   color: var(--destructive);
-  font-size: 0.875rem;
+   @apply text-sm;
 }
 
 .resource-page {
@@ -67,6 +69,7 @@
 
 .resource-title {
   overflow-wrap: anywhere;
+   @apply text-lg;
   line-height: 1.35;
 }
 
@@ -74,7 +77,7 @@
   margin-top: 0.4rem;
   overflow-wrap: anywhere;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
+   @apply text-sm;
   line-height: 1.45;
 }
 
@@ -109,14 +112,14 @@
 
 .resource-metric-label {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+   @apply text-xs;
   font-weight: 600;
 }
 
 .resource-metric-value {
   margin-top: 0.35rem;
   overflow-wrap: anywhere;
-  font-size: 1rem;
+   @apply text-base;
   font-weight: 650;
   line-height: 1.35;
 }
@@ -129,7 +132,7 @@
 
 .resource-section-title {
   margin: 0;
-  font-size: 0.9375rem;
+   @apply text-base;
   font-weight: 650;
   line-height: 1.35;
 }
@@ -171,7 +174,7 @@
 
 .resource-readonly-label {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+   @apply text-xs;
   font-weight: 650;
 }
 
@@ -179,7 +182,7 @@
   overflow-wrap: anywhere;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.8125rem;
+   @apply text-sm;
 }
 
 .resource-select {
@@ -191,7 +194,7 @@
   background: var(--background);
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
-  font-size: 0.875rem;
+   @apply text-sm;
   outline: none;
   transition:
     border-color 150ms ease,
@@ -241,7 +244,7 @@
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 0.875rem;
+   @apply text-sm;
 }
 
 .resource-danger-zone {
@@ -269,7 +272,7 @@
 .resource-danger-text {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+   @apply text-sm;
   line-height: 1.4;
 }
 
@@ -290,7 +293,7 @@
   background: color-mix(in oklch, var(--success) 10%, transparent);
   border: 1px solid color-mix(in oklch, var(--success) 28%, transparent);
   border-radius: var(--radius-md);
-  font-size: 0.875rem;
+   @apply text-sm;
 }
 
 .resource-empty {
@@ -300,15 +303,15 @@
   background: var(--muted);
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
-  font-size: 0.875rem;
+   @apply text-sm;
 }
 
-.resource-mapping-list {
+.resource-policy-list {
   display: grid;
   gap: 0.5rem;
 }
 
-.resource-mapping-row {
+.resource-policy-row {
   display: grid;
   gap: 0.2rem;
   padding: 0.75rem;
@@ -317,14 +320,48 @@
   border-radius: var(--radius-md);
 }
 
-.resource-mapping-title {
-  font-size: 0.875rem;
-  font-weight: 650;
+.resource-policy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.resource-mapping-meta {
+.resource-policy-title {
+   @apply text-sm;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.resource-policy-limit {
   color: var(--muted-foreground);
+  @apply text-xs;
+  background: var(--background);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.resource-policy-route {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
   font-size: 0.8125rem;
+}
+
+.resource-policy-route-provider {
+  font-weight: 600;
+}
+
+.resource-policy-route-model {
+  color: var(--muted-foreground);
+}
+
+.resource-policy-route-weight {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  @apply text-xs;
+  font-family: monospace;
 }
 
 @media (min-width: 640px) {

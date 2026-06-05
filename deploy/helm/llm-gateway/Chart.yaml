@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-gateway
+description: Rust Pingora OpenAI Chat API gateway with Axum admin API and Vue admin web
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

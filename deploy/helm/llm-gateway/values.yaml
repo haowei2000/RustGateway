@@ -1,0 +1,94 @@
+global:
+  imagePullPolicy: IfNotPresent
+  domain: llm-gateway.example.com
+
+gateway:
+  enabled: true
+  image: registry.example.com/llm-gateway/pingora-gateway:0.1.0
+  replicas: 3
+  containerPort: 8080
+  metricsPort: 9090
+  env:
+    RUST_LOG: info
+    OPENAI_BASE_URL: https://api.openai.com
+    OPENAI_KEY_REF: default-openai-key
+  secret:
+    openaiApiKey: ""
+    internalApiKeys: ""
+    internalApiKeyHashes: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    cpuAverageUtilization: 60
+
+adminApi:
+  enabled: true
+  image: registry.example.com/llm-gateway/admin-api:0.1.0
+  replicas: 2
+  containerPort: 9000
+  env:
+    DATABASE_MAX_CONNECTIONS: "5"
+    DATABASE_AUTO_MIGRATE: "true"
+  secret:
+    jwtSecret: ""
+  resources:
+    requests:
+      cpu: 300m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+
+adminWeb:
+  enabled: true
+  image: registry.example.com/llm-gateway/admin-web:0.1.0
+  replicas: 1
+  containerPort: 80
+
+redis:
+  mode: external
+  image: redis:7-alpine
+  urlSecretName: llm-gateway-redis-secret
+  urlSecretKey: REDIS_URL
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+database:
+  mode: external
+  image: postgres:16-alpine
+  urlSecretName: llm-gateway-db-secret
+  urlSecretKey: DATABASE_URL
+  local:
+    username: llm
+    password: llm
+    database: llm_gateway
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: llm-gateway-tls
+
+serviceMonitor:
+  enabled: false

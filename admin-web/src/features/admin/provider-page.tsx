@@ -12,7 +12,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { AdminData, ProviderModel, ProviderSummary, ResourceStatus } from "@/lib/api"
+import { useCreateProviderModel } from "@/hooks/use-admin-data"
+import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
+import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
 import {
   EmptyBlock,
@@ -36,16 +38,26 @@ type ProviderPageProps = {
 }
 
 type ProviderDraft = {
-  base_url: string
-  key_ref: string
-  name: string
+  provider_base_url: string
+  provider_key: string
+  provider_name: string
   providerModels: ProviderModel[]
-  status: ResourceStatus
 }
 
 function ProviderPage({ data, isFetching, selectedItemId, onRefresh }: ProviderPageProps) {
   if (!data) {
     return <EmptyResourcePage message="Loading provider details." />
+  }
+
+  if (selectedItemId === NEW_SIDEBAR_ITEM_ID) {
+    return (
+      <ProviderPageContent
+        key="new-provider"
+        data={data}
+        isFetching={isFetching}
+        onRefresh={onRefresh}
+      />
+    )
   }
 
   const item = getSelectedItem(data.providers, selectedItemId)
@@ -72,13 +84,14 @@ function ProviderPageContent({
 }: {
   data: AdminData
   isFetching: boolean
-  item: ProviderSummary
+  item?: ProviderSummary
   onRefresh: () => void
 }) {
   const [draft, setDraft] = useState<ProviderDraft>(() => createProviderDraft(item, data))
   const [editingModelId, setEditingModelId] = useState("")
-  const [newSupplierModelName, setNewSupplierModelName] = useState("")
+  const [newProviderModelName, setNewProviderModelName] = useState("")
   const [notice, setNotice] = useState("")
+  const createProviderModelMutation = useCreateProviderModel()
 
   function updateProviderModel(modelId: string, patch: Partial<ProviderModel>) {
     setDraft((current) => ({
@@ -89,18 +102,43 @@ function ProviderPageContent({
     }))
   }
 
-  function addProviderModel() {
-    const supplierName = newSupplierModelName.trim()
-    if (!supplierName) return
+  async function addProviderModel() {
+    const modelName = newProviderModelName.trim()
+    if (!modelName) {
+      setNotice("Enter a provider model name first.")
+      return
+    }
+
+    if (item) {
+      try {
+        const providerModel = await createProviderModelMutation.mutateAsync({
+          model_name: modelName,
+          provider_id: item.id,
+        })
+
+        setDraft((current) => ({
+          ...current,
+          providerModels: current.providerModels.some((model) => model.id === providerModel.id)
+            ? current.providerModels.map((model) =>
+                model.id === providerModel.id ? providerModel : model,
+              )
+            : [...current.providerModels, providerModel],
+        }))
+        setEditingModelId("")
+        setNewProviderModelName("")
+        setNotice(`Provider model ${providerModel.model_name} added.`)
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to add provider model.")
+      }
+      return
+    }
 
     const providerModel: ProviderModel = {
-      context_window: null,
-      fetched_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
       id: `draft_${Date.now()}`,
-      owned_by: draft.name,
-      provider_id: item.id,
-      status: "active",
-      supplier_model_name: supplierName,
+      model_name: modelName,
+      provider_id: "draft_provider",
     }
 
     setDraft((current) => ({
@@ -108,19 +146,17 @@ function ProviderPageContent({
       providerModels: [...current.providerModels, providerModel],
     }))
     setEditingModelId(providerModel.id)
-    setNewSupplierModelName("")
+    setNewProviderModelName("")
     setNotice("Provider model added to the local draft.")
   }
 
   return (
     <ResourcePageFrame variant="provider">
       <ResourcePageHeader
-        description={draft.base_url}
+        description={draft.provider_base_url || "New provider draft"}
         icon={Database}
         isFetching={isFetching}
-        isMock={data.isMock}
-        status={draft.status}
-        title={draft.name}
+        title={draft.provider_name || "New Provider"}
         onRefresh={onRefresh}
       />
 
@@ -131,60 +167,46 @@ function ProviderPageContent({
               <Label htmlFor="provider-name">Name</Label>
               <Input
                 id="provider-name"
-                value={draft.name}
+                value={draft.provider_name}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, name: event.target.value }))
+                  setDraft((current) => ({ ...current, provider_name: event.target.value }))
                 }
               />
-            </div>
-            <div className="resource-field">
-              <Label htmlFor="provider-status">Status</Label>
-              <select
-                id="provider-status"
-                className="resource-select"
-                value={draft.status}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    status: event.target.value as ResourceStatus,
-                  }))
-                }
-              >
-                <option value="active">active</option>
-                <option value="disabled">disabled</option>
-              </select>
             </div>
             <div className="resource-field resource-field-wide">
               <Label htmlFor="provider-base-url">Base URL</Label>
               <Input
                 id="provider-base-url"
-                value={draft.base_url}
+                value={draft.provider_base_url}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, base_url: event.target.value }))
+                  setDraft((current) => ({ ...current, provider_base_url: event.target.value }))
                 }
               />
             </div>
-            <div className="resource-field">
-              <Label htmlFor="provider-key-ref">Key ref</Label>
-              <Input
-                id="provider-key-ref"
-                value={draft.key_ref}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, key_ref: event.target.value }))
-                }
-              />
-            </div>
-            <ReadOnlyField label="Provider ID" value={item.id} />
+            {!item ? (
+              <div className="resource-field resource-field-wide">
+                <Label htmlFor="provider-key">Provider key</Label>
+                <Input
+                  id="provider-key"
+                  type="password"
+                  value={draft.provider_key}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, provider_key: event.target.value }))
+                  }
+                />
+              </div>
+            ) : (
+              <ReadOnlyField label="Provider ID" value={item.id} />
+            )}
           </div>
         </ResourceCard>
 
         <div className="resource-side-stack">
           <ResourceMetrics
             metrics={[
-              { label: "Fetched Models", value: formatNumber(draft.providerModels.length) },
-              { label: "Mappings", value: formatNumber(item.mapping_count) },
-              { label: "Last Fetched", value: formatDate(item.last_fetched_at) },
-              { label: "Created", value: formatDate(item.created_at) },
+              { label: "Provider Models", value: formatNumber(draft.providerModels.length) },
+              { label: "Policies", value: item ? formatNumber(item.policy_count) : "0" },
+              { label: "Created", value: item ? formatDate(item.created_at) : "-" },
             ]}
           />
 
@@ -214,27 +236,30 @@ function ProviderPageContent({
           actions={
             <>
               <Input
-                placeholder="supplier-model-name"
-                value={newSupplierModelName}
-                onChange={(event) => setNewSupplierModelName(event.target.value)}
+                placeholder="provider-model-name"
+                value={newProviderModelName}
+                onChange={(event) => setNewProviderModelName(event.target.value)}
               />
-              <Button type="button" variant="outline" onClick={addProviderModel}>
+              <Button
+                disabled={createProviderModelMutation.isPending}
+                type="button"
+                variant="outline"
+                onClick={addProviderModel}
+              >
                 <Plus className="icon-sm" aria-hidden="true" />
-                Add model
+                {createProviderModelMutation.isPending ? "Adding" : "Add model"}
               </Button>
             </>
           }
-          title="Fetched and manually added upstream models"
+          title="Upstream model names"
         />
 
         {draft.providerModels.length > 0 ? (
           <Table className="resource-inline-table resource-provider-table">
             <TableHeader>
               <TableRow>
-                <TableHead>Supplier model</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Context</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Provider model</TableHead>
+                <TableHead>Created</TableHead>
                 <TableHead className="resource-actions-cell">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -247,55 +272,15 @@ function ProviderPageContent({
                     <TableCell>
                       <Input
                         disabled={!isEditing}
-                        value={model.supplier_model_name}
+                        value={model.model_name}
                         onChange={(event) =>
                           updateProviderModel(model.id, {
-                            supplier_model_name: event.target.value,
+                            model_name: event.target.value,
                           })
                         }
                       />
                     </TableCell>
-                    <TableCell>
-                      <Input
-                        disabled={!isEditing}
-                        value={model.owned_by ?? ""}
-                        onChange={(event) =>
-                          updateProviderModel(model.id, {
-                            owned_by: event.target.value || null,
-                          })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        className="resource-number-input"
-                        disabled={!isEditing}
-                        min={0}
-                        type="number"
-                        value={model.context_window ?? ""}
-                        onChange={(event) =>
-                          updateProviderModel(model.id, {
-                            context_window:
-                              event.target.value === "" ? null : Number(event.target.value),
-                          })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <select
-                        className="resource-select resource-select-compact"
-                        disabled={!isEditing}
-                        value={model.status}
-                        onChange={(event) =>
-                          updateProviderModel(model.id, {
-                            status: event.target.value as ResourceStatus,
-                          })
-                        }
-                      >
-                        <option value="active">active</option>
-                        <option value="disabled">disabled</option>
-                      </select>
-                    </TableCell>
+                    <TableCell>{formatDate(model.created_at)}</TableCell>
                     <TableCell>
                       <ResourceActions>
                         <Button
@@ -344,15 +329,23 @@ function ProviderPageContent({
   )
 }
 
-function createProviderDraft(item: ProviderSummary, data: AdminData): ProviderDraft {
+function createProviderDraft(item: ProviderSummary | undefined, data: AdminData): ProviderDraft {
+  if (!item) {
+    return {
+      provider_base_url: "",
+      provider_key: "",
+      provider_name: "",
+      providerModels: [],
+    }
+  }
+
   return {
-    base_url: item.base_url,
-    key_ref: item.key_ref,
-    name: item.name,
+    provider_base_url: item.provider_base_url,
+    provider_key: "",
+    provider_name: item.provider_name,
     providerModels: data.providerModels
       .filter((model) => model.provider_id === item.id)
       .map((model) => ({ ...model })),
-    status: item.status,
   }
 }
 

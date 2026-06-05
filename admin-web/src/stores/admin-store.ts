@@ -1,22 +1,23 @@
+import type { ModelType } from "@/lib/api"
 import { create } from "zustand"
 
 export type SidebarResource = "keys" | "providers" | "models"
 
+export const NEW_SIDEBAR_ITEM_ID = "__new__"
+
 type ModelDraft = {
   model_name: string
-  model_options: string[]
-  default_max_tokens: number
+  model_type: ModelType
 }
 
 type ProviderDraft = {
-  name: string
-  base_url: string
-  provider_api_key: string
-  fetch_models: boolean
+  provider_name: string
+  provider_base_url: string
+  provider_key: string
 }
 
 type ApiKeyDraft = {
-  name: string
+  key_name: string
 }
 
 type AdminStore = {
@@ -29,7 +30,6 @@ type AdminStore = {
   setSidebarResource: (resource: SidebarResource) => void
   setSelectedSidebarItemId: (id: string) => void
   setModelDraft: (draft: Partial<ModelDraft>) => void
-  toggleModelOption: (option: string) => void
   setProviderDraft: (draft: Partial<ProviderDraft>) => void
   setApiKeyDraft: (draft: Partial<ApiKeyDraft>) => void
   setGeneratedApiKey: (key: string) => void
@@ -40,17 +40,15 @@ export const useAdminStore = create<AdminStore>()((set) => ({
   selectedSidebarItemId: "",
   modelDraft: {
     model_name: "epichust-chat",
-    model_options: ["chat", "streaming"],
-    default_max_tokens: 8192,
+    model_type: "chat_model",
   },
   providerDraft: {
-    name: "OpenAI Primary",
-    base_url: "https://api.openai.com",
-    provider_api_key: "",
-    fetch_models: true,
+    provider_name: "OpenAI Primary",
+    provider_base_url: "https://api.openai.com",
+    provider_key: "",
   },
   apiKeyDraft: {
-    name: "New API Key",
+    key_name: "New API Key",
   },
   generatedApiKey: "",
   setSidebarResource: (resource) =>
@@ -63,18 +61,6 @@ export const useAdminStore = create<AdminStore>()((set) => ({
     set((state) => ({
       modelDraft: { ...state.modelDraft, ...draft },
     })),
-  toggleModelOption: (option) =>
-    set((state) => {
-      const isSelected = state.modelDraft.model_options.includes(option)
-      return {
-        modelDraft: {
-          ...state.modelDraft,
-          model_options: isSelected
-            ? state.modelDraft.model_options.filter((item) => item !== option)
-            : [...state.modelDraft.model_options, option],
-        },
-      }
-    }),
   setProviderDraft: (draft) =>
     set((state) => ({
       providerDraft: { ...state.providerDraft, ...draft },

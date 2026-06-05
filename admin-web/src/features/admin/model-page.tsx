@@ -1,11 +1,11 @@
 import { useState } from "react"
-import { Layers3, Plus, RotateCcw, Save } from "lucide-react"
+import { Layers3, RotateCcw, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { AdminData, EpichustModel, ResourceStatus } from "@/lib/api"
+import type { AdminData, EpichustModel, ModelType } from "@/lib/api"
+import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
 import {
   EmptyResourcePage,
@@ -16,11 +16,8 @@ import {
   ResourceNotice,
   ResourcePageFrame,
   ResourcePageHeader,
-  ResourceSectionHeader,
 } from "./resource-page-parts"
-import { formatDate, formatList, formatNumber, getSelectedItem } from "./resource-page-utils"
-
-const capabilityOptions = ["chat", "streaming", "json_mode", "tool_calling", "vision", "embedding"]
+import { formatDate, formatNumber, getSelectedItem } from "./resource-page-utils"
 
 type ModelPageProps = {
   data: AdminData | undefined
@@ -30,15 +27,24 @@ type ModelPageProps = {
 }
 
 type ModelDraft = {
-  default_max_tokens: number
   model_name: string
-  model_options: string[]
-  status: ResourceStatus
+  model_type: ModelType
 }
 
 function ModelPage({ data, isFetching, selectedItemId, onRefresh }: ModelPageProps) {
   if (!data) {
     return <EmptyResourcePage message="Loading model details." />
+  }
+
+  if (selectedItemId === NEW_SIDEBAR_ITEM_ID) {
+    return (
+      <ModelPageContent
+        key="new-model"
+        data={data}
+        isFetching={isFetching}
+        onRefresh={onRefresh}
+      />
+    )
   }
 
   const item = getSelectedItem(data.models, selectedItemId)
@@ -65,38 +71,23 @@ function ModelPageContent({
 }: {
   data: AdminData
   isFetching: boolean
-  item: EpichustModel
+  item?: EpichustModel
   onRefresh: () => void
 }) {
   const [draft, setDraft] = useState<ModelDraft>(() => createModelDraft(item))
-  const [capabilityToAdd, setCapabilityToAdd] = useState("")
   const [notice, setNotice] = useState("")
-
-  const visibleCapabilities = Array.from(new Set([...capabilityOptions, ...draft.model_options]))
-  const availableCapabilities = capabilityOptions.filter(
-    (capability) => !draft.model_options.includes(capability),
-  )
-  const effectiveCapabilityToAdd = capabilityToAdd || availableCapabilities[0] || ""
-  const modelMappings = data.mappings.filter((mapping) => mapping.epichust_model_id === item.id)
-
-  function setCapability(capability: string, enabled: boolean) {
-    setDraft((current) => ({
-      ...current,
-      model_options: enabled
-        ? Array.from(new Set([...current.model_options, capability]))
-        : current.model_options.filter((item) => item !== capability),
-    }))
-  }
+  const modelPolicies = item
+    ? data.policies.filter((policy) => policy.epichust_model_id === item.id)
+    : []
 
   return (
     <ResourcePageFrame variant="model">
       <ResourcePageHeader
-        description={formatList(draft.model_options)}
+        description={draft.model_type}
         icon={Layers3}
         isFetching={isFetching}
-        isMock={data.isMock}
-        status={draft.status}
-        title={draft.model_name}
+        status={draft.model_type}
+        title={draft.model_name || "New Model"}
         onRefresh={onRefresh}
       />
 
@@ -114,90 +105,30 @@ function ModelPageContent({
               />
             </div>
             <div className="resource-field">
-              <Label htmlFor="model-status">Status</Label>
+              <Label htmlFor="model-type">Type</Label>
               <select
-                id="model-status"
+                id="model-type"
                 className="resource-select"
-                value={draft.status}
+                value={draft.model_type}
                 onChange={(event) =>
                   setDraft((current) => ({
                     ...current,
-                    status: event.target.value as ResourceStatus,
+                    model_type: event.target.value as ModelType,
                   }))
                 }
               >
-                <option value="active">active</option>
-                <option value="disabled">disabled</option>
+                <option value="chat_model">chat_model</option>
+                <option value="embedding_model">embedding_model</option>
               </select>
             </div>
-            <div className="resource-field">
-              <Label htmlFor="model-default-tokens">Default max tokens</Label>
-              <Input
-                id="model-default-tokens"
-                min={1}
-                type="number"
-                value={draft.default_max_tokens}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    default_max_tokens: Number(event.target.value),
-                  }))
-                }
-              />
-            </div>
-            <ReadOnlyField label="Model ID" value={item.id} />
-            <ReadOnlyField label="Created" value={formatDate(item.created_at)} />
-          </div>
-        </ResourceCard>
-
-        <ResourceCard title="Capabilities">
-          <ResourceSectionHeader
-            actions={
+            {item ? (
               <>
-                <select
-                  className="resource-select"
-                  disabled={availableCapabilities.length === 0}
-                  value={effectiveCapabilityToAdd}
-                  onChange={(event) => setCapabilityToAdd(event.target.value)}
-                >
-                  {availableCapabilities.length > 0 ? (
-                    availableCapabilities.map((capability) => (
-                      <option key={capability} value={capability}>
-                        {capability}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">All capabilities added</option>
-                  )}
-                </select>
-                <Button
-                  disabled={!effectiveCapabilityToAdd}
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setCapability(effectiveCapabilityToAdd, true)
-                    setCapabilityToAdd("")
-                    setNotice("Capability added to the local draft.")
-                  }}
-                >
-                  <Plus className="icon-sm" aria-hidden="true" />
-                  Add
-                </Button>
+                <ReadOnlyField label="Model ID" value={item.id} />
+                <ReadOnlyField label="Created" value={formatDate(item.created_at)} />
               </>
-            }
-            title="Runtime options"
-          />
-
-          <div className="resource-checkbox-grid">
-            {visibleCapabilities.map((capability) => (
-              <label key={capability} className="resource-checkbox-row">
-                <Checkbox
-                  checked={draft.model_options.includes(capability)}
-                  onCheckedChange={(checked) => setCapability(capability, checked === true)}
-                />
-                <span>{capability}</span>
-              </label>
-            ))}
+            ) : (
+              <ReadOnlyField label="Mode" value="New draft" />
+            )}
           </div>
         </ResourceCard>
       </div>
@@ -205,29 +136,46 @@ function ModelPageContent({
       <div className="resource-layout resource-layout-model-bottom">
         <ResourceMetrics
           metrics={[
-            { label: "Capabilities", value: draft.model_options.length },
-            { label: "Default Tokens", value: formatNumber(draft.default_max_tokens) },
-            { label: "Mapped Sources", value: formatNumber(modelMappings.length) },
+            { label: "Policies", value: formatNumber(modelPolicies.length) },
             {
-              label: "Enabled Sources",
-              value: formatNumber(modelMappings.filter((mapping) => mapping.enabled).length),
+              label: "Enabled Policies",
+              value: formatNumber(modelPolicies.filter((policy) => policy.enabled).length),
             },
           ]}
         />
 
         <ResourceCard title="Routing Summary">
-          <div className="resource-mapping-list">
-            {modelMappings.length > 0 ? (
-              modelMappings.map((mapping) => (
-                <div key={mapping.id} className="resource-mapping-row">
-                  <span className="resource-mapping-title">{mapping.provider_name}</span>
-                  <span className="resource-mapping-meta">
-                    {mapping.supplier_model_name} / priority {mapping.priority}
-                  </span>
+          <div className="resource-policy-list">
+            {modelPolicies.length > 0 ? (
+              modelPolicies.map((policy) => (
+                <div key={policy.id} className="resource-policy-row">
+                  <div className="resource-policy-header">
+                    <span className="resource-policy-title">
+                      {policy.routing_strategy}
+                    </span>
+                    {policy.usage_limit_type && (
+                      <span className="resource-policy-limit">
+                        {policy.usage_limit_type}: {policy.usage_limit_value}
+                      </span>
+                    )}
+                  </div>
+                  {policy.routes.map((route) => (
+                    <div key={route.provider_model_id} className="resource-policy-route">
+                      <span className="resource-policy-route-provider">
+                        {route.provider_name}
+                      </span>
+                      <span className="resource-policy-route-model">
+                        {route.provider_model_name}
+                      </span>
+                      <span className="resource-policy-route-weight">
+                        w:{route.weight} p:{route.priority}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ))
             ) : (
-              <ReadOnlyField label="Mappings" value="No provider mappings configured." />
+              <ReadOnlyField label="Policies" value="No mapping policies configured." />
             )}
           </div>
         </ResourceCard>
@@ -256,12 +204,17 @@ function ModelPageContent({
   )
 }
 
-function createModelDraft(item: EpichustModel): ModelDraft {
+function createModelDraft(item?: EpichustModel): ModelDraft {
+  if (!item) {
+    return {
+      model_name: "",
+      model_type: "chat_model",
+    }
+  }
+
   return {
-    default_max_tokens: item.default_max_tokens,
     model_name: item.model_name,
-    model_options: [...item.model_options],
-    status: item.status,
+    model_type: item.model_type,
   }
 }
 

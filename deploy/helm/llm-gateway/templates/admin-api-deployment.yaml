@@ -1,0 +1,53 @@
+{{- if .Values.adminApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: axum-admin-api
+spec:
+  replicas: {{ .Values.adminApi.replicas }}
+  selector:
+    matchLabels:
+      app: axum-admin-api
+  template:
+    metadata:
+      labels:
+        app: axum-admin-api
+    spec:
+      containers:
+        - name: admin-api
+          image: {{ .Values.adminApi.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.adminApi.containerPort }}
+          envFrom:
+            - configMapRef:
+                name: llm-gateway-config
+            - secretRef:
+                name: llm-gateway-secret
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.urlSecretName }}
+                  key: {{ .Values.database.urlSecretKey }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.urlSecretName }}
+                  key: {{ .Values.redis.urlSecretKey }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+{{ toYaml .Values.adminApi.resources | indent 12 }}
+{{- end }}

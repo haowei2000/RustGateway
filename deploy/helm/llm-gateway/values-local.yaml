@@ -5,10 +5,10 @@ global:
 gateway:
   image: llm-gateway/pingora-gateway:local
   replicas: 1
-  secret:
-    openaiApiKey: ""
-    internalApiKeys: local-internal-key
-    internalApiKeyHashes: ""
+  serviceType: NodePort
+  nodePorts:
+    http: 30080
+    metrics: 30909
   resources:
     requests:
       cpu: 100m
@@ -22,6 +22,8 @@ gateway:
 adminApi:
   image: llm-gateway/admin-api:local
   replicas: 1
+  serviceType: NodePort
+  nodePort: 30900
   env:
     DATABASE_MAX_CONNECTIONS: "5"
     DATABASE_AUTO_MIGRATE: "true"
@@ -38,6 +40,8 @@ adminApi:
 adminWeb:
   image: llm-gateway/admin-web:local
   replicas: 1
+  serviceType: NodePort
+  nodePort: 30300
 
 redis:
   mode: local
@@ -48,6 +52,10 @@ database:
   mode: local
   urlSecretName: llm-gateway-secret
   urlSecretKey: DATABASE_URL
+  local:
+    persistence:
+      enabled: true
+      hostPath: /data/postgres
 
 ingress:
   enabled: false

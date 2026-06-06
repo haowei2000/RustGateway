@@ -19,5 +19,7 @@ pingora-http.workspace = true
 pingora-proxy.workspace = true
 prometheus.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
+tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 uuid.workspace = true

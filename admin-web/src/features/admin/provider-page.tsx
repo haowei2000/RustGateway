@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { Check, Database, Pencil, Plus, RotateCcw, Save } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Check, Database, Download, Loader2, Pencil, Plus, RotateCcw, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,7 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useCreateProviderModel } from "@/hooks/use-admin-data"
+import { useCreateProvider, useCreateProviderModel } from "@/hooks/use-admin-data"
+import { getProviderAvailableModels } from "@/lib/api"
 import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
@@ -92,6 +93,73 @@ function ProviderPageContent({
   const [newProviderModelName, setNewProviderModelName] = useState("")
   const [notice, setNotice] = useState("")
   const createProviderModelMutation = useCreateProviderModel()
+  const createProviderMutation = useCreateProvider()
+  const isNew = !item
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [modelsFetched, setModelsFetched] = useState(false)
+
+  // Auto-fetch upstream models when opening an existing provider with no models
+  useEffect(() => {
+    if (item && draft.providerModels.length === 0 && !modelsFetched) {
+      setModelsFetched(true)
+      doFetchModels()
+    }
+  }, [item?.id, modelsFetched]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function doFetchModels() {
+    if (!item) return
+    setFetchingModels(true)
+    setNotice("")
+    try {
+      const result = await getProviderAvailableModels(item.id)
+      let added = 0
+      for (const m of result.models) {
+        try {
+          const providerModel = await createProviderModelMutation.mutateAsync({
+            model_name: m.model_name,
+            provider_id: item.id,
+          })
+          setDraft((current) => ({
+            ...current,
+            providerModels: current.providerModels.some((pm) => pm.id === providerModel.id)
+              ? current.providerModels.map((pm) =>
+                  pm.id === providerModel.id ? providerModel : pm,
+                )
+              : [...current.providerModels, providerModel],
+          }))
+          added++
+        } catch {
+          // duplicate — skip
+        }
+      }
+      setNotice(
+        `Fetched ${result.models.length} model(s) from upstream. Registered ${added} new.`,
+      )
+      onRefresh()
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Failed to fetch upstream models.",
+      )
+    } finally {
+      setFetchingModels(false)
+    }
+  }
+
+  async function handleSave() {
+    if (isNew) {
+      try {
+        const result = await createProviderMutation.mutateAsync({
+          provider_name: draft.provider_name.trim() || "New Provider",
+          provider_base_url: draft.provider_base_url.trim(),
+          provider_key: draft.provider_key,
+        })
+        setNotice(`Provider "${result.provider.provider_name}" created.`)
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to create provider.")
+      }
+    }
+  }
 
   function updateProviderModel(modelId: string, patch: Partial<ProviderModel>) {
     setDraft((current) => ({
@@ -148,6 +216,10 @@ function ProviderPageContent({
     setEditingModelId(providerModel.id)
     setNewProviderModelName("")
     setNotice("Provider model added to the local draft.")
+  }
+
+  function fetchAndSyncModels() {
+    doFetchModels()
   }
 
   return (
@@ -223,10 +295,25 @@ function ProviderPageContent({
               <RotateCcw className="icon-sm" aria-hidden="true" />
               Reset
             </Button>
-            <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
-              <Save className="icon-sm" aria-hidden="true" />
-              Save draft
-            </Button>
+            {isNew ? (
+              <Button
+                disabled={createProviderMutation.isPending}
+                type="button"
+                onClick={handleSave}
+              >
+                {createProviderMutation.isPending ? (
+                  <Loader2 className="icon-sm refresh-icon-busy" aria-hidden="true" />
+                ) : (
+                  <Save className="icon-sm" aria-hidden="true" />
+                )}
+                {createProviderMutation.isPending ? "Saving…" : "Create provider"}
+              </Button>
+            ) : (
+              <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
+                <Save className="icon-sm" aria-hidden="true" />
+                Save draft
+              </Button>
+            )}
           </ResourceActions>
         </div>
       </div>
@@ -249,6 +336,20 @@ function ProviderPageContent({
                 <Plus className="icon-sm" aria-hidden="true" />
                 {createProviderModelMutation.isPending ? "Adding" : "Add model"}
               </Button>
+              {item ? (
+                <Button
+                  disabled={fetchingModels}
+                  type="button"
+                  variant="outline"
+                  onClick={fetchAndSyncModels}
+                >
+                  <Download
+                    className={`icon-sm ${fetchingModels ? "refresh-icon-busy" : ""}`}
+                    aria-hidden="true"
+                  />
+                  {fetchingModels ? "Fetching…" : "Fetch upstream"}
+                </Button>
+              ) : null}
             </>
           }
           title="Upstream model names"

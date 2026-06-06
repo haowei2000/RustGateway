@@ -4,10 +4,14 @@ kind: Service
 metadata:
   name: admin-api
 spec:
+  type: {{ .Values.adminApi.serviceType | default "ClusterIP" }}
   selector:
     app: axum-admin-api
   ports:
     - name: http
       port: 9000
       targetPort: http
+      {{- with .Values.adminApi.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
 {{- end }}

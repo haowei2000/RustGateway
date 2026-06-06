@@ -6,7 +6,8 @@ use llm_gateway_common::{
         ApiKeyMappingPolicy, ApiKeySummary, AttachApiKeyMappingPolicyRequest, AuditLogEntry,
         CreateApiKeyRequest, CreateApiKeyResponse, CreateEpichustModelRequest,
         CreateMappingPolicyRequest, CreateProviderModelRequest, CreateProviderRequest,
-        CreateProviderResponse, EpichustModel, MappingPolicy, MappingPolicyRoute, ModelType, ProviderModel, ProviderSummary, RoutingStrategy,
+        CreateProviderResponse, EpichustModel, MappingPolicy, MappingPolicyRoute, ModelType,
+        ProviderModel, ProviderSummary, RateLimitRule, RoutingStrategy,
         UpdateMappingPolicyRequest, UsageLimitType,
     },
 };
@@ -223,8 +224,6 @@ const MAPPING_POLICY_SELECT: &str = r#"
         mp.epichust_model_id,
         em.model_name AS epichust_model_name,
         mp.routing_strategy,
-        mp.usage_limit_type,
-        mp.usage_limit_value,
         mp.enabled,
         mp.created_at
     FROM mapping_policies mp
@@ -236,23 +235,25 @@ pub async fn list_mapping_policies(pool: &PgPool) -> Result<Vec<MappingPolicy>, 
         .fetch_all(pool)
         .await?;
 
-    let policy_ids: Vec<String> = policy_rows.iter().map(|row| row.try_get("id").unwrap()).collect();
+    let policy_ids: Vec<String> = policy_rows
+        .iter()
+        .map(|row| row.try_get("id").unwrap())
+        .collect();
     let routes_by_policy = load_mapping_policy_routes_bulk(pool, &policy_ids).await?;
+    let rules_by_policy = load_rate_limit_rules_bulk(pool, &policy_ids).await?;
 
     policy_rows
         .into_iter()
         .map(|row| {
             let id: String = row.try_get("id")?;
             let routes = routes_by_policy.get(&id).cloned().unwrap_or_default();
+            let rate_limit_rules = rules_by_policy.get(&id).cloned().unwrap_or_default();
             Ok(MappingPolicy {
                 id,
                 epichust_model_id: row.try_get("epichust_model_id")?,
                 epichust_model_name: row.try_get("epichust_model_name")?,
                 routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
-                usage_limit_type: row
-                    .try_get::<Option<String>, _>("usage_limit_type")?
-                    .map(parse_usage_limit_type),
-                usage_limit_value: row.try_get("usage_limit_value")?,
+                rate_limit_rules,
                 enabled: row.try_get("enabled")?,
                 routes,
                 created_at: row.try_get("created_at")?,
@@ -268,16 +269,14 @@ pub async fn get_mapping_policy(pool: &PgPool, id: &str) -> Result<MappingPolicy
         .await?;
 
     let routes = load_mapping_policy_routes(pool, id).await?;
+    let rate_limit_rules = load_rate_limit_rules(pool, id).await?;
 
     Ok(MappingPolicy {
         id: row.try_get("id")?,
         epichust_model_id: row.try_get("epichust_model_id")?,
         epichust_model_name: row.try_get("epichust_model_name")?,
         routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
-        usage_limit_type: row
-            .try_get::<Option<String>, _>("usage_limit_type")?
-            .map(parse_usage_limit_type),
-        usage_limit_value: row.try_get("usage_limit_value")?,
+        rate_limit_rules,
         enabled: row.try_get("enabled")?,
         routes,
         created_at: row.try_get("created_at")?,
@@ -294,19 +293,36 @@ pub async fn create_mapping_policy(
     sqlx::query(
         r#"
         INSERT INTO mapping_policies (
-            id, epichust_model_id, routing_strategy,
-            usage_limit_type, usage_limit_value, enabled
+            id, epichust_model_id, routing_strategy, enabled
         )
-        VALUES ($1, $2, $3, $4, $5, true)
+        VALUES ($1, $2, $3, $4)
         "#,
     )
     .bind(&id)
     .bind(&request.epichust_model_id)
     .bind(routing_strategy_to_str(&request.routing_strategy))
-    .bind(request.usage_limit_type.as_ref().map(usage_limit_type_to_str))
-    .bind(request.usage_limit_value)
+    .bind(request.enabled)
     .execute(&mut *tx)
     .await?;
+
+    for rule in &request.rate_limit_rules {
+        sqlx::query(
+            r#"
+            INSERT INTO rate_limit_rules (
+                id, mapping_policy_id, limit_type, limit_value
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (mapping_policy_id, limit_type)
+            DO UPDATE SET limit_value = EXCLUDED.limit_value
+            "#,
+        )
+        .bind(generated_id("rlr"))
+        .bind(&id)
+        .bind(usage_limit_type_to_str(&rule.limit_type))
+        .bind(rule.limit_value)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     for route in &request.routes {
         sqlx::query(
@@ -342,30 +358,48 @@ pub async fn update_mapping_policy(
 ) -> Result<MappingPolicy, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    if request.routing_strategy.is_some()
-        || request.usage_limit_type.is_some()
-        || request.usage_limit_value.is_some()
-        || request.enabled.is_some()
-    {
+    if request.routing_strategy.is_some() || request.enabled.is_some() {
         sqlx::query(
             r#"
             UPDATE mapping_policies
             SET
                 routing_strategy = COALESCE($2, routing_strategy),
-                usage_limit_type = $3,
-                usage_limit_value = $4,
-                enabled = COALESCE($5, enabled),
+                enabled = COALESCE($3, enabled),
                 updated_at = now()
             WHERE id = $1
             "#,
         )
         .bind(id)
         .bind(request.routing_strategy.as_ref().map(routing_strategy_to_str))
-        .bind(request.usage_limit_type.as_ref().map(usage_limit_type_to_str))
-        .bind(request.usage_limit_value)
         .bind(request.enabled)
         .execute(&mut *tx)
         .await?;
+    }
+
+    if let Some(rules) = &request.rate_limit_rules {
+        sqlx::query(
+            r#"DELETE FROM rate_limit_rules WHERE mapping_policy_id = $1"#,
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        for rule in rules {
+            sqlx::query(
+                r#"
+                INSERT INTO rate_limit_rules (
+                    id, mapping_policy_id, limit_type, limit_value
+                )
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(generated_id("rlr"))
+            .bind(id)
+            .bind(usage_limit_type_to_str(&rule.limit_type))
+            .bind(rule.limit_value)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
 
     if let Some(routes) = &request.routes {
@@ -485,6 +519,71 @@ const MAPPING_POLICY_ROUTES_SELECT: &str = r#"
     ORDER BY mpr.priority ASC, mpr.created_at ASC
 "#;
 
+async fn load_rate_limit_rules(
+    pool: &PgPool,
+    policy_id: &str,
+) -> Result<Vec<RateLimitRule>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT limit_type, limit_value
+        FROM rate_limit_rules
+        WHERE mapping_policy_id = $1
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(policy_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|row| RateLimitRule {
+            limit_type: parse_usage_limit_type(row.try_get::<String, _>("limit_type").unwrap()),
+            limit_value: row.try_get("limit_value").unwrap_or(100),
+        })
+        .collect())
+}
+
+async fn load_rate_limit_rules_bulk(
+    pool: &PgPool,
+    policy_ids: &[String],
+) -> Result<HashMap<String, Vec<RateLimitRule>>, sqlx::Error> {
+    if policy_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders: Vec<String> = policy_ids
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("${}", i + 1))
+        .collect();
+    let sql = format!(
+        r#"
+        SELECT mapping_policy_id, limit_type, limit_value
+        FROM rate_limit_rules
+        WHERE mapping_policy_id IN ({})
+        ORDER BY created_at ASC
+        "#,
+        placeholders.join(", ")
+    );
+
+    let mut query = sqlx::query(&sql);
+    for id in policy_ids {
+        query = query.bind(id);
+    }
+
+    let rows = query.fetch_all(pool).await?;
+    let mut rules_by_policy = HashMap::<String, Vec<RateLimitRule>>::new();
+    for row in &rows {
+        let policy_id: String = row.try_get("mapping_policy_id")?;
+        rules_by_policy.entry(policy_id).or_default().push(RateLimitRule {
+            limit_type: parse_usage_limit_type(row.try_get::<String, _>("limit_type").unwrap()),
+            limit_value: row.try_get("limit_value").unwrap_or(100),
+        });
+    }
+    Ok(rules_by_policy)
+}
+
 fn mapping_policy_route_from_row(row: &sqlx::postgres::PgRow) -> MappingPolicyRoute {
     MappingPolicyRoute {
         provider_model_id: row.try_get("provider_model_id").unwrap_or_default(),
@@ -581,7 +680,7 @@ pub async fn create_api_key(
     })
 }
 
-/// Load all api_key → mapping_policy links with nested routes.
+/// Load all api_key → mapping_policy links with nested routes and rate limit rules.
 async fn load_api_key_mapping_policies(
     pool: &PgPool,
 ) -> Result<HashMap<String, Vec<ApiKeyMappingPolicy>>, sqlx::Error> {
@@ -593,9 +692,7 @@ async fn load_api_key_mapping_policies(
             akmp.enabled AS link_enabled,
             mp.epichust_model_id,
             em.model_name AS epichust_model_name,
-            mp.routing_strategy,
-            mp.usage_limit_type,
-            mp.usage_limit_value
+            mp.routing_strategy
         FROM api_key_mapping_policies akmp
         JOIN mapping_policies mp ON mp.id = akmp.mapping_policy_id
         JOIN epichust_models em ON em.id = mp.epichust_model_id
@@ -610,22 +707,21 @@ async fn load_api_key_mapping_policies(
         .map(|row| row.try_get::<String, _>("mapping_policy_id").unwrap())
         .collect();
     let routes_by_policy = load_mapping_policy_routes_bulk(pool, &policy_ids).await?;
+    let rules_by_policy = load_rate_limit_rules_bulk(pool, &policy_ids).await?;
 
     let mut policies_by_key = HashMap::<String, Vec<ApiKeyMappingPolicy>>::new();
     for row in &rows {
         let api_key_id: String = row.try_get("api_key_id")?;
         let policy_id: String = row.try_get("mapping_policy_id")?;
         let routes = routes_by_policy.get(&policy_id).cloned().unwrap_or_default();
+        let rate_limit_rules = rules_by_policy.get(&policy_id).cloned().unwrap_or_default();
 
         policies_by_key.entry(api_key_id).or_default().push(ApiKeyMappingPolicy {
             mapping_policy_id: policy_id,
             epichust_model_id: row.try_get("epichust_model_id")?,
             epichust_model_name: row.try_get("epichust_model_name")?,
             routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
-            usage_limit_type: row
-                .try_get::<Option<String>, _>("usage_limit_type")?
-                .map(parse_usage_limit_type),
-            usage_limit_value: row.try_get("usage_limit_value")?,
+            rate_limit_rules,
             enabled: row.try_get("link_enabled")?,
             routes,
         });
@@ -685,9 +781,7 @@ async fn get_api_key_mapping_policy(
             akmp.enabled AS link_enabled,
             mp.epichust_model_id,
             em.model_name AS epichust_model_name,
-            mp.routing_strategy,
-            mp.usage_limit_type,
-            mp.usage_limit_value
+            mp.routing_strategy
         FROM api_key_mapping_policies akmp
         JOIN mapping_policies mp ON mp.id = akmp.mapping_policy_id
         JOIN epichust_models em ON em.id = mp.epichust_model_id
@@ -700,16 +794,14 @@ async fn get_api_key_mapping_policy(
     .await?;
 
     let routes = load_mapping_policy_routes(pool, mapping_policy_id).await?;
+    let rate_limit_rules = load_rate_limit_rules(pool, mapping_policy_id).await?;
 
     Ok(ApiKeyMappingPolicy {
         mapping_policy_id: row.try_get("mapping_policy_id")?,
         epichust_model_id: row.try_get("epichust_model_id")?,
         epichust_model_name: row.try_get("epichust_model_name")?,
         routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
-        usage_limit_type: row
-            .try_get::<Option<String>, _>("usage_limit_type")?
-            .map(parse_usage_limit_type),
-        usage_limit_value: row.try_get("usage_limit_value")?,
+        rate_limit_rules,
         enabled: row.try_get("link_enabled")?,
         routes,
     })

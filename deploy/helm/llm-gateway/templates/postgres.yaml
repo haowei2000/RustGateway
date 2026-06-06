@@ -44,7 +44,13 @@ spec:
 {{ toYaml .Values.database.resources | indent 12 }}
       volumes:
         - name: postgres-data
+          {{- if .Values.database.local.persistence.enabled }}
+          hostPath:
+            path: {{ .Values.database.local.persistence.hostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
           emptyDir: {}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

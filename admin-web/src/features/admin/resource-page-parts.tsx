@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 type ResourcePageFrameProps = {
   children: ReactNode
-  variant?: "key" | "provider" | "model"
+  variant?: "key" | "provider" | "model" | "policy"
 }
 
 function ResourcePageFrame({ children, variant }: ResourcePageFrameProps) {

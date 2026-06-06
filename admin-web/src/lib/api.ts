@@ -62,6 +62,18 @@ export type CreateProviderModelRequest = {
   model_name: string
 }
 
+// ── Rate Limit Rules ──
+
+export type RateLimitRule = {
+  limit_type: UsageLimitType
+  limit_value: number
+}
+
+export type RateLimitRuleRequest = {
+  limit_type: UsageLimitType
+  limit_value: number
+}
+
 // ── Mapping Policy ──
 
 export type MappingPolicyRoute = {
@@ -86,8 +98,7 @@ export type MappingPolicy = {
   epichust_model_id: string
   epichust_model_name: string
   routing_strategy: RoutingStrategy
-  usage_limit_type: UsageLimitType | null
-  usage_limit_value: number | null
+  rate_limit_rules: RateLimitRule[]
   enabled: boolean
   routes: MappingPolicyRoute[]
   created_at: string
@@ -96,15 +107,14 @@ export type MappingPolicy = {
 export type CreateMappingPolicyRequest = {
   epichust_model_id: string
   routing_strategy: RoutingStrategy
-  usage_limit_type: UsageLimitType | null
-  usage_limit_value: number | null
+  rate_limit_rules: RateLimitRuleRequest[]
+  enabled: boolean
   routes: MappingPolicyRouteRequest[]
 }
 
 export type UpdateMappingPolicyRequest = {
   routing_strategy?: RoutingStrategy
-  usage_limit_type?: UsageLimitType | null
-  usage_limit_value?: number | null
+  rate_limit_rules?: RateLimitRuleRequest[]
   enabled?: boolean
   routes?: MappingPolicyRouteRequest[]
 }
@@ -116,8 +126,7 @@ export type ApiKeyMappingPolicy = {
   epichust_model_id: string
   epichust_model_name: string
   routing_strategy: RoutingStrategy
-  usage_limit_type: UsageLimitType | null
-  usage_limit_value: number | null
+  rate_limit_rules: RateLimitRule[]
   enabled: boolean
   routes: MappingPolicyRoute[]
 }

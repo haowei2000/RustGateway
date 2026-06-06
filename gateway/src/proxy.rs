@@ -16,13 +16,13 @@ use prometheus::{
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::config::GatewayConfig;
+use crate::db::Cache;
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 const BODY_PROBE_LIMIT: usize = 64 * 1024;
 
 pub struct LlmGateway {
-    config: Arc<GatewayConfig>,
+    cache: Cache,
     requests_total: IntCounter,
     auth_failures_total: IntCounter,
     upstream_errors_total: IntCounter,
@@ -30,7 +30,6 @@ pub struct LlmGateway {
     request_duration: Histogram,
 }
 
-#[derive(Debug)]
 pub struct RequestContext {
     request_id: Uuid,
     started_at: Instant,
@@ -42,67 +41,47 @@ pub struct RequestContext {
     model: Option<String>,
     stream: Option<bool>,
     body_probe: Vec<u8>,
+    body_rewritten: bool,
+    provider_base_url: Option<String>,
+    provider_name: Option<String>,
+    provider_key: Option<String>,
+    upstream_host: Option<String>,
 }
 
 impl LlmGateway {
-    pub fn new(config: Arc<GatewayConfig>) -> std::result::Result<Self, prometheus::Error> {
+    pub fn new(
+        _config: Arc<crate::config::GatewayConfig>,
+        cache: Cache,
+    ) -> std::result::Result<Self, prometheus::Error> {
         Ok(Self {
-            config,
+            cache,
             requests_total: register_int_counter!(
-                "gateway_requests_total",
-                "Total requests seen by the Pingora gateway"
+                "gateway_requests_total", "Total requests"
             )?,
             auth_failures_total: register_int_counter!(
-                "gateway_auth_failures_total",
-                "Gateway authentication failures"
+                "gateway_auth_failures_total", "Auth failures"
             )?,
             upstream_errors_total: register_int_counter!(
-                "gateway_upstream_errors_total",
-                "Gateway upstream proxy errors"
+                "gateway_upstream_errors_total", "Upstream errors"
             )?,
             active_requests: register_int_gauge!(
-                "gateway_active_requests",
-                "Current active proxied requests"
+                "gateway_active_requests", "Active requests"
             )?,
             request_duration: register_histogram!(
-                "gateway_request_duration_seconds",
-                "Gateway request latency in seconds"
+                "gateway_request_duration_seconds", "Request latency"
             )?,
         })
     }
 
-    async fn respond_json(
-        &self,
-        session: &mut Session,
-        status: u16,
-        body: serde_json::Value,
-    ) -> Result<()> {
-        let body = Bytes::from(body.to_string());
-        let mut header = ResponseHeader::build(status, Some(4))?;
-        header.insert_header("Content-Type", "application/json")?;
-        header.insert_header("Content-Length", body.len().to_string())?;
-        session
-            .write_response_header(Box::new(header), false)
-            .await?;
-        session.write_response_body(Some(body), true).await
-    }
-
-    fn observe_body_probe(ctx: &mut RequestContext, body: &[u8], end_of_stream: bool) {
-        if ctx.body_probe.len() < BODY_PROBE_LIMIT {
-            let remaining = BODY_PROBE_LIMIT - ctx.body_probe.len();
-            ctx.body_probe
-                .extend_from_slice(&body[..body.len().min(remaining)]);
-        }
-
-        if end_of_stream {
-            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_probe) {
-                ctx.model = value
-                    .get("model")
-                    .and_then(|model| model.as_str())
-                    .map(ToOwned::to_owned);
-                ctx.stream = value.get("stream").and_then(|stream| stream.as_bool());
-            }
-        }
+    fn resolve_provider(&self) -> Option<(String, String, String)> {
+        let cache = self.cache.read().ok()?;
+        cache.model_routes.values().next().map(|r| {
+            (
+                r.provider.provider_base_url.clone(),
+                r.provider.provider_name.clone(),
+                r.provider.provider_key.clone(),
+            )
+        })
     }
 }
 
@@ -122,6 +101,11 @@ impl ProxyHttp for LlmGateway {
             model: None,
             stream: None,
             body_probe: Vec::new(),
+            body_rewritten: false,
+            provider_base_url: None,
+            provider_name: None,
+            provider_key: None,
+            upstream_host: None,
         }
     }
 
@@ -130,111 +114,42 @@ impl ProxyHttp for LlmGateway {
 
         if path == "/healthz" {
             ctx.audit_enabled = false;
-            self.respond_json(
-                session,
-                200,
-                json!({
-                    "status": "ok",
-                    "service": "pingora-gateway"
-                }),
-            )
-            .await?;
-            return Ok(true);
+            return self.respond_json(session, 200, json!({"status":"ok","service":"pingora-gateway"})).await;
         }
-
         if path != CHAT_COMPLETIONS_PATH {
-            ctx.auth_result = AuthResult::InvalidFormat;
-            ctx.reject_reason = Some("unsupported_path".to_owned());
-            self.respond_json(
-                session,
-                404,
-                json!({
-                    "error": {
-                        "message": "unsupported gateway path",
-                        "type": "not_found"
-                    }
-                }),
-            )
-            .await?;
-            return Ok(true);
+            return self.respond_json(session, 404, json!({"error":{"message":"not found","type":"not_found"}})).await;
         }
-
         if session.req_header().method != Method::POST {
-            ctx.auth_result = AuthResult::InvalidFormat;
-            ctx.reject_reason = Some("method_not_allowed".to_owned());
-            self.respond_json(
-                session,
-                405,
-                json!({
-                    "error": {
-                        "message": "only POST is allowed",
-                        "type": "method_not_allowed"
-                    }
-                }),
-            )
-            .await?;
-            return Ok(true);
+            return self.respond_json(session, 405, json!({"error":{"message":"POST only","type":"method_not_allowed"}})).await;
         }
 
-        let authorization = session
-            .req_header()
-            .headers
+        // Auth
+        let token = session.req_header().headers
             .get("Authorization")
-            .and_then(|value| value.to_str().ok());
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_bearer_token);
 
-        let Some(token) = authorization.and_then(parse_bearer_token) else {
+        let Some(token) = token else {
             ctx.auth_result = AuthResult::Missing;
-            ctx.reject_reason = Some("missing_internal_api_key".to_owned());
             self.auth_failures_total.inc();
-            self.respond_json(
-                session,
-                401,
-                json!({
-                    "error": {
-                        "message": "missing Authorization bearer token",
-                        "type": "authentication_error"
-                    }
-                }),
-            )
-            .await?;
-            return Ok(true);
+            return self.respond_json(session, 401, json!({"error":{"message":"missing bearer token","type":"authentication_error"}})).await;
         };
 
         let key_hash = hash_api_key(token);
         ctx.key_hash_prefix = Some(hash_prefix(&key_hash));
-        if !self.config.internal_api_key_hashes.contains(&key_hash) {
+        if !self.cache.read().map(|g| g.key_hashes.contains(&key_hash)).unwrap_or(false) {
             ctx.auth_result = AuthResult::InvalidKey;
-            ctx.reject_reason = Some("invalid_internal_api_key".to_owned());
             self.auth_failures_total.inc();
-            self.respond_json(
-                session,
-                403,
-                json!({
-                    "error": {
-                        "message": "invalid internal API key",
-                        "type": "permission_error"
-                    }
-                }),
-            )
-            .await?;
-            return Ok(true);
+            return self.respond_json(session, 403, json!({"error":{"message":"invalid key","type":"permission_error"}})).await;
         }
 
-        if self.config.openai_api_key.is_none() {
-            ctx.auth_result = AuthResult::UpstreamKeyMissing;
-            ctx.reject_reason = Some("missing_openai_api_key".to_owned());
-            self.respond_json(
-                session,
-                503,
-                json!({
-                    "error": {
-                        "message": "upstream provider key is not configured",
-                        "type": "provider_unavailable"
-                    }
-                }),
-            )
-            .await?;
-            return Ok(true);
+        // Resolve provider
+        if let Some((base_url, name, key)) = self.resolve_provider() {
+            let url = url::Url::parse(&base_url).unwrap_or_else(|_| url::Url::parse("https://api.openai.com").unwrap());
+            ctx.provider_base_url = Some(base_url);
+            ctx.provider_name = Some(name);
+            ctx.provider_key = Some(key);
+            ctx.upstream_host = Some(url.host_str().unwrap_or("api.openai.com").to_owned());
         }
 
         ctx.auth_result = AuthResult::Ok;
@@ -243,99 +158,93 @@ impl ProxyHttp for LlmGateway {
         Ok(false)
     }
 
-    async fn upstream_peer(
-        &self,
-        _session: &mut Session,
-        _ctx: &mut Self::CTX,
-    ) -> Result<Box<HttpPeer>> {
-        let peer = HttpPeer::new(
-            (
-                self.config.upstream_host.as_str(),
-                self.config.upstream_port,
-            ),
-            self.config.upstream_tls,
-            self.config.upstream_host.clone(),
-        );
-        Ok(Box::new(peer))
-    }
-
-    async fn upstream_request_filter(
-        &self,
-        _session: &mut Session,
-        upstream_request: &mut RequestHeader,
-        _ctx: &mut Self::CTX,
-    ) -> Result<()> {
-        upstream_request.insert_header("Host", self.config.upstream_host.clone())?;
-        upstream_request.insert_header(
-            "Authorization",
-            format!(
-                "Bearer {}",
-                self.config.openai_api_key.as_deref().unwrap_or_default()
-            ),
-        )?;
-        upstream_request.insert_header("X-LLM-Gateway", "pingora")?;
-        Ok(())
-    }
-
     async fn request_body_filter(
-        &self,
-        _session: &mut Session,
-        body: &mut Option<Bytes>,
-        end_of_stream: bool,
-        ctx: &mut Self::CTX,
-    ) -> Result<()>
-    where
-        Self::CTX: Send + Sync,
-    {
-        if let Some(body) = body.as_ref() {
-            Self::observe_body_probe(ctx, body, end_of_stream);
+        &self, _session: &mut Session, body: &mut Option<Bytes>, end_of_stream: bool, ctx: &mut Self::CTX,
+    ) -> Result<()> where Self::CTX: Send + Sync {
+        if let Some(ref b) = body {
+            if ctx.body_probe.len() < BODY_PROBE_LIMIT {
+                let r = BODY_PROBE_LIMIT - ctx.body_probe.len();
+                ctx.body_probe.extend_from_slice(&b[..b.len().min(r)]);
+            }
+        }
+        if !end_of_stream || ctx.body_rewritten { return Ok(()); }
+
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_probe) {
+            let original_model = value.get("model").and_then(|m| m.as_str()).unwrap_or("").to_owned();
+            ctx.model = Some(original_model.clone());
+            ctx.stream = value.get("stream").and_then(|s| s.as_bool());
+
+            if !original_model.is_empty() {
+                if let Ok(cache) = self.cache.read() {
+                    if let Some(route) = cache.model_routes.get(&original_model) {
+                        let mut raw = String::from_utf8_lossy(&ctx.body_probe).into_owned();
+                        let prefix = "\"model\": \"";
+                        if let Some(p) = raw.find(prefix) {
+                            let vs = p + prefix.len();
+                            if let Some(ve) = raw[vs..].find('"') {
+                                let ve = vs + ve;
+                                raw.replace_range(vs..ve, &route.provider_model_name);
+                                let mut bytes = raw.into_bytes();
+                                while bytes.len() < ctx.body_probe.len() { bytes.push(b' '); }
+                                *body = Some(Bytes::from(bytes));
+                                ctx.body_rewritten = true;
+                                log::info!("model translated: '{original_model}' → '{}'",
+                                    route.provider_model_name);
+                            }
+                        }
+                    } else if let Some(route) = cache.model_routes.values().next() {
+                        ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
+                        ctx.provider_name = Some(route.provider.provider_name.clone());
+                        ctx.provider_key = Some(route.provider.provider_key.clone());
+                        let u = url::Url::parse(&route.provider.provider_base_url).ok();
+                        ctx.upstream_host = u.as_ref().and_then(|u| u.host_str().map(|h| h.to_owned()));
+                    }
+                }
+            }
         }
         Ok(())
     }
 
-    async fn response_filter(
-        &self,
-        _session: &mut Session,
-        upstream_response: &mut ResponseHeader,
-        _ctx: &mut Self::CTX,
-    ) -> Result<()>
-    where
-        Self::CTX: Send + Sync,
-    {
-        upstream_response.insert_header("X-LLM-Gateway", "pingora")?;
-        upstream_response.remove_header("alt-svc");
+    async fn upstream_peer(&self, _session: &mut Session, ctx: &mut Self::CTX) -> Result<Box<HttpPeer>> {
+        let host = ctx.upstream_host.as_deref().unwrap_or("api.openai.com");
+        let tls = ctx.provider_base_url.as_ref().map(|u| u.starts_with("https://")).unwrap_or(true);
+        let port = if tls { 443 } else { 80 };
+        Ok(Box::new(HttpPeer::new((host, port), tls, host.to_owned())))
+    }
+
+    async fn upstream_request_filter(
+        &self, _session: &mut Session, upstream_request: &mut RequestHeader, ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        if let Some(ref host) = ctx.upstream_host {
+            upstream_request.insert_header("Host", host.as_str())?;
+        }
+        if let Some(ref key) = ctx.provider_key {
+            upstream_request.insert_header("Authorization", format!("Bearer {key}"))?;
+        }
+        Ok(())
+    }
+
+    async fn response_filter(&self, _session: &mut Session, resp: &mut ResponseHeader, _ctx: &mut Self::CTX)
+        -> Result<()> where Self::CTX: Send+Sync {
+        resp.insert_header("X-LLM-Gateway", "pingora")?;
         Ok(())
     }
 
     async fn logging(&self, session: &mut Session, error: Option<&Error>, ctx: &mut Self::CTX)
-    where
-        Self::CTX: Send + Sync,
+        where Self::CTX: Send+Sync
     {
         let latency = ctx.started_at.elapsed();
-        let status_code = session
-            .response_written()
-            .map_or(0, |response| response.status.as_u16());
-
+        let status_code = session.response_written().map_or(0, |r| r.status.as_u16());
         self.requests_total.inc();
         self.request_duration.observe(latency.as_secs_f64());
-        if error.is_some() {
-            self.upstream_errors_total.inc();
-        }
-        if ctx.counted_active {
-            self.active_requests.dec();
-        }
-        if !ctx.audit_enabled {
-            return;
-        }
+        if error.is_some() { self.upstream_errors_total.inc(); }
+        if ctx.counted_active { self.active_requests.dec(); }
+        if !ctx.audit_enabled { return; }
 
         let event = AuditEvent {
             request_id: ctx.request_id,
-            caller_id: None,
-            app_id: None,
-            client_ip: session
-                .client_addr()
-                .map(|addr| addr.to_string())
-                .or_else(|| header_value_to_string(session.get_header("X-Forwarded-For"))),
+            caller_id: None, app_id: None,
+            client_ip: session.client_addr().map(|a| a.to_string()),
             method: session.req_header().method.to_string(),
             path: session.req_header().uri.path().to_owned(),
             model: ctx.model.clone(),
@@ -343,28 +252,28 @@ impl ProxyHttp for LlmGateway {
             status_code,
             auth_result: ctx.auth_result.clone(),
             reject_reason: ctx.reject_reason.clone(),
-            provider: Some("openai".to_owned()),
-            upstream_host: Some(self.config.upstream_host.clone()),
-            upstream_request_id: session
-                .get_header("x-request-id")
-                .or_else(|| session.get_header("request-id"))
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
+            provider: ctx.provider_name.clone(),
+            upstream_host: ctx.provider_base_url.clone(),
+            upstream_request_id: None,
             latency_ms: latency.as_millis(),
             key_hash_prefix: ctx.key_hash_prefix.clone(),
-            user_agent: header_value_to_string(session.get_header("User-Agent")),
+            user_agent: None,
             created_at: chrono::Utc::now(),
         };
-
-        match serde_json::to_string(&event) {
-            Ok(line) => log::info!("{line}"),
-            Err(err) => log::warn!("failed to serialize audit event: {err}"),
+        if let Ok(line) = serde_json::to_string(&event) {
+            log::info!("{line}");
         }
     }
 }
 
-fn header_value_to_string(value: Option<&http::HeaderValue>) -> Option<String> {
-    value
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned)
+impl LlmGateway {
+    async fn respond_json(&self, session: &mut Session, status: u16, body: serde_json::Value) -> Result<bool> {
+        let body = Bytes::from(body.to_string());
+        let mut h = ResponseHeader::build(status, Some(4))?;
+        h.insert_header("Content-Type", "application/json")?;
+        h.insert_header("Content-Length", body.len().to_string())?;
+        session.write_response_header(Box::new(h), false).await?;
+        session.write_response_body(Some(body), true).await?;
+        Ok(true)
+    }
 }

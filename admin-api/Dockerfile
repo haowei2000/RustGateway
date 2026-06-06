@@ -2,7 +2,7 @@ FROM rust:1.95-slim AS builder
 
 WORKDIR /workspace
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl pkg-config \
+    && apt-get install -y --no-install-recommends ca-certificates curl libssl-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./

@@ -1,9 +1,10 @@
 import { useState } from "react"
-import { Layers3, RotateCcw, Save } from "lucide-react"
+import { Layers3, Loader2, RotateCcw, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useCreateEpichustModel } from "@/hooks/use-admin-data"
 import type { AdminData, EpichustModel, ModelType } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
@@ -76,9 +77,26 @@ function ModelPageContent({
 }) {
   const [draft, setDraft] = useState<ModelDraft>(() => createModelDraft(item))
   const [notice, setNotice] = useState("")
+  const createMutation = useCreateEpichustModel()
+  const isNew = !item
   const modelPolicies = item
     ? data.policies.filter((policy) => policy.epichust_model_id === item.id)
     : []
+
+  async function handleSave() {
+    if (isNew) {
+      try {
+        const created = await createMutation.mutateAsync({
+          model_name: draft.model_name.trim() || "epichust-chat",
+          model_type: draft.model_type,
+        })
+        setNotice(`Model "${created.model_name}" created.`)
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to create model.")
+      }
+    }
+  }
 
   return (
     <ResourcePageFrame variant="model">
@@ -153,11 +171,13 @@ function ModelPageContent({
                     <span className="resource-policy-title">
                       {policy.routing_strategy}
                     </span>
-                    {policy.usage_limit_type && (
-                      <span className="resource-policy-limit">
-                        {policy.usage_limit_type}: {policy.usage_limit_value}
-                      </span>
-                    )}
+                    <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                      {(policy.rate_limit_rules ?? []).map((rule) => (
+                        <span key={rule.limit_type} className="resource-policy-limit">
+                          {rule.limit_type}: {rule.limit_value}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   {policy.routes.map((route) => (
                     <div key={route.provider_model_id} className="resource-policy-route">
@@ -193,10 +213,25 @@ function ModelPageContent({
           <RotateCcw className="icon-sm" aria-hidden="true" />
           Reset
         </Button>
-        <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
-          <Save className="icon-sm" aria-hidden="true" />
-          Save draft
-        </Button>
+        {isNew ? (
+          <Button
+            disabled={createMutation.isPending}
+            type="button"
+            onClick={handleSave}
+          >
+            {createMutation.isPending ? (
+              <Loader2 className="icon-sm refresh-icon-busy" aria-hidden="true" />
+            ) : (
+              <Save className="icon-sm" aria-hidden="true" />
+            )}
+            {createMutation.isPending ? "Saving…" : "Create model"}
+          </Button>
+        ) : (
+          <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
+            <Save className="icon-sm" aria-hidden="true" />
+            Save draft
+          </Button>
+        )}
       </ResourceActions>
 
       {notice ? <ResourceNotice>{notice}</ResourceNotice> : null}

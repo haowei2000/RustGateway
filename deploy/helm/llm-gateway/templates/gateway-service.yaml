@@ -4,13 +4,20 @@ kind: Service
 metadata:
   name: pingora-gateway
 spec:
+  type: {{ .Values.gateway.serviceType | default "ClusterIP" }}
   selector:
     app: pingora-gateway
   ports:
     - name: http
       port: 80
       targetPort: http
+      {{- with .Values.gateway.nodePorts }}
+      nodePort: {{ .http }}
+      {{- end }}
     - name: metrics
       port: 9090
       targetPort: metrics
+      {{- with .Values.gateway.nodePorts }}
+      nodePort: {{ .metrics }}
+      {{- end }}
 {{- end }}

@@ -8,6 +8,7 @@ use crate::config::AdminApiConfig;
 const MIGRATIONS: &[&str] = &[
     include_str!("../../deploy/sql/001_init.sql"),
     include_str!("../../deploy/sql/002_mapping_policies.sql"),
+    include_str!("../../deploy/sql/003_rate_limit_rules.sql"),
 ];
 
 pub async fn connect(config: &AdminApiConfig) -> Result<Option<PgPool>> {

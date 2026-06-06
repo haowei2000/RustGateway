@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Ban, Check, KeyRound, Pencil, Plus, RotateCcw, Save } from "lucide-react"
+import { Ban, Check, KeyRound, Loader2, Pencil, Plus, RotateCcw, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  useAttachApiKeyMappingPolicy,
+  useCreateApiKey,
+  useDetachApiKeyMappingPolicy,
+} from "@/hooks/use-admin-data"
 import type {
   AdminData,
   ApiKeyMappingPolicy,
@@ -100,6 +105,9 @@ function ApiKeyPageContent({
   const [editingPolicyId, setEditingPolicyId] = useState("")
   const [policyToAddId, setPolicyToAddId] = useState("")
   const [notice, setNotice] = useState("")
+  const createApiKeyMutation = useCreateApiKey()
+  const attachPolicyMutation = useAttachApiKeyMappingPolicy()
+  const detachPolicyMutation = useDetachApiKeyMappingPolicy()
 
   const availablePolicies = attachablePolicies(data, draft)
   const effectivePolicyToAddId =
@@ -108,12 +116,44 @@ function ApiKeyPageContent({
     (count, mp) => count + mp.routes.length,
     0,
   )
+  const isNew = !item
 
-  function addMappingPolicy() {
+  async function handleSave() {
+    if (isNew) {
+      try {
+        const result = await createApiKeyMutation.mutateAsync({
+          key_name: draft.key_name.trim() || "New API Key",
+        })
+        setNotice(
+          `API key created! Copy your key now: ${result.plaintext_api_key}`,
+        )
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to create API key.")
+      }
+    }
+  }
+
+  async function addMappingPolicy() {
     const policy = data.policies.find(
       (candidate) => candidate.id === effectivePolicyToAddId,
     )
     if (!policy) return
+
+    if (item) {
+      try {
+        await attachPolicyMutation.mutateAsync({
+          apiKeyId: item.id,
+          input: { mapping_policy_id: policy.id },
+        })
+        setNotice(`Policy "${policy.epichust_model_name}" attached to API key.`)
+        setPolicyToAddId("")
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to attach policy.")
+      }
+      return
+    }
 
     const mp: ApiKeyMappingPolicy = {
       enabled: true,
@@ -121,8 +161,9 @@ function ApiKeyPageContent({
       epichust_model_name: policy.epichust_model_name,
       mapping_policy_id: policy.id,
       routing_strategy: policy.routing_strategy,
-      usage_limit_type: policy.usage_limit_type,
-      usage_limit_value: policy.usage_limit_value,
+      rate_limit_rules: (policy.rate_limit_rules ?? []).map((rule) => ({
+        ...rule,
+      })),
       routes: policy.routes.map((route) => ({ ...route })),
     }
 
@@ -134,7 +175,22 @@ function ApiKeyPageContent({
     setNotice("Mapping policy added to the local draft.")
   }
 
-  function removeMappingPolicy(policyId: string) {
+  async function removeMappingPolicy(policyId: string) {
+    if (item) {
+      try {
+        await detachPolicyMutation.mutateAsync({
+          apiKeyId: item.id,
+          mappingPolicyId: policyId,
+        })
+        setNotice("Policy detached from API key.")
+        setEditingPolicyId("")
+        onRefresh()
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Failed to detach policy.")
+      }
+      return
+    }
+
     setDraft((current) => ({
       ...current,
       mappingPolicies: current.mappingPolicies.filter(
@@ -254,10 +310,14 @@ function ApiKeyPageContent({
                         )}
                       </TableCell>
                       <TableCell>
-                        {mp.usage_limit_type ? (
-                          <span>
-                            {mp.usage_limit_type}: {mp.usage_limit_value}
-                          </span>
+                        {mp.rate_limit_rules.length > 0 ? (
+                          <ul className="resource-route-list">
+                            {mp.rate_limit_rules.map((rule) => (
+                              <li key={rule.limit_type}>
+                                {rule.limit_type}: {rule.limit_value}
+                              </li>
+                            ))}
+                          </ul>
                         ) : (
                           <span className="resource-muted-text">Unlimited</span>
                         )}
@@ -394,13 +454,25 @@ function ApiKeyPageContent({
               <RotateCcw className="icon-sm" aria-hidden="true" />
               Reset
             </Button>
-            <Button
-              type="button"
-              onClick={() => setNotice("Draft staged locally.")}
-            >
-              <Save className="icon-sm" aria-hidden="true" />
-              Save draft
-            </Button>
+            {isNew ? (
+              <Button
+                disabled={createApiKeyMutation.isPending}
+                type="button"
+                onClick={handleSave}
+              >
+                {createApiKeyMutation.isPending ? (
+                  <Loader2 className="icon-sm refresh-icon-busy" aria-hidden="true" />
+                ) : (
+                  <Save className="icon-sm" aria-hidden="true" />
+                )}
+                {createApiKeyMutation.isPending ? "Saving…" : "Create API key"}
+              </Button>
+            ) : (
+              <Button type="button" onClick={() => setNotice("Draft staged locally.")}>
+                <Save className="icon-sm" aria-hidden="true" />
+                Save draft
+              </Button>
+            )}
           </ResourceActions>
         </div>
       </div>
@@ -424,6 +496,7 @@ function createApiKeyDraft(item?: ApiKeySummary): ApiKeyDraft {
     key_name: item.key_name,
     mappingPolicies: item.mapping_policies.map((mp) => ({
       ...mp,
+      rate_limit_rules: (mp.rate_limit_rules ?? []).map((rule) => ({ ...rule })),
       routes: mp.routes.map((route) => ({ ...route })),
     })),
   }

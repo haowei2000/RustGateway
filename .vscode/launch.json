@@ -1,0 +1,68 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug admin-api",
+      "cargo": {
+        "args": ["build", "--package=axum-admin-api"],
+        "filter": {
+          "name": "axum-admin-api",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug,tower_http=debug,sqlx=debug",
+        "RUST_BACKTRACE": "1",
+        "DATABASE_URL": "postgres://llm:llm@localhost:5432/llm_gateway",
+        "DATABASE_AUTO_MIGRATE": "true",
+        "REDIS_URL": "redis://localhost:6379",
+        "JWT_SECRET": "dev-secret",
+        "ADMIN_API_BIND_ADDR": "0.0.0.0:9000"
+      },
+      "sourceMap": {}
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug pingora-gateway",
+      "cargo": {
+        "args": ["build", "--package=pingora-gateway"],
+        "filter": {
+          "name": "pingora-gateway",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUST_LOG": "debug,tower_http=debug",
+        "RUST_BACKTRACE": "1",
+        "GATEWAY_BIND_ADDR": "0.0.0.0:8080",
+        "METRICS_BIND_ADDR": "0.0.0.0:9090",
+        "OPENAI_BASE_URL": "https://api.openai.com",
+        "OPENAI_API_KEY": "",
+        "OPENAI_KEY_REF": "local",
+        "INTERNAL_API_KEYS": "local-internal-key",
+        "REDIS_URL": "redis://localhost:6379"
+      },
+      "sourceMap": {}
+    },
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Debug admin-web (Chrome)",
+      "url": "http://localhost:5173/admin/",
+      "webRoot": "${workspaceFolder}/admin-web/src",
+      "sourceMapPathOverrides": {
+        "webpack:///./src/*": "${webRoot}/*",
+        "webpack:///src/*": "${webRoot}/*",
+        "webpack:///*": "*",
+        "webpack:///./~/*": "${workspaceFolder}/admin-web/node_modules/*"
+      }
+    }
+  ]
+}

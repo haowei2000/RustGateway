@@ -424,6 +424,11 @@
     grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
     align-items: start;
   }
+
+  .resource-layout-policy {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
 }
 
 @media (min-width: 1280px) {

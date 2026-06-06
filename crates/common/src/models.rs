@@ -64,6 +64,14 @@ pub struct CreateProviderResponse {
     pub provider: ProviderSummary,
 }
 
+// ── Rate Limit Rules ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RateLimitRule {
+    pub limit_type: UsageLimitType,
+    pub limit_value: i32,
+}
+
 // ── Mapping Policy (replaces ModelMapping) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -91,8 +99,7 @@ pub struct MappingPolicy {
     pub epichust_model_id: String,
     pub epichust_model_name: String,
     pub routing_strategy: RoutingStrategy,
-    pub usage_limit_type: Option<UsageLimitType>,
-    pub usage_limit_value: Option<i32>,
+    pub rate_limit_rules: Vec<RateLimitRule>,
     pub enabled: bool,
     pub routes: Vec<MappingPolicyRoute>,
     pub created_at: DateTime<Utc>,
@@ -102,16 +109,15 @@ pub struct MappingPolicy {
 pub struct CreateMappingPolicyRequest {
     pub epichust_model_id: String,
     pub routing_strategy: RoutingStrategy,
-    pub usage_limit_type: Option<UsageLimitType>,
-    pub usage_limit_value: Option<i32>,
+    pub rate_limit_rules: Vec<RateLimitRule>,
+    pub enabled: bool,
     pub routes: Vec<MappingPolicyRouteRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateMappingPolicyRequest {
     pub routing_strategy: Option<RoutingStrategy>,
-    pub usage_limit_type: Option<UsageLimitType>,
-    pub usage_limit_value: Option<i32>,
+    pub rate_limit_rules: Option<Vec<RateLimitRule>>,
     pub enabled: Option<bool>,
     pub routes: Option<Vec<MappingPolicyRouteRequest>>,
 }
@@ -124,8 +130,7 @@ pub struct ApiKeyMappingPolicy {
     pub epichust_model_id: String,
     pub epichust_model_name: String,
     pub routing_strategy: RoutingStrategy,
-    pub usage_limit_type: Option<UsageLimitType>,
-    pub usage_limit_value: Option<i32>,
+    pub rate_limit_rules: Vec<RateLimitRule>,
     pub enabled: bool,
     pub routes: Vec<MappingPolicyRoute>,
 }

@@ -1,4 +1,4 @@
-import { Database, KeyRound, Layers3, type LucideIcon } from "lucide-react"
+import { Database, KeyRound, Layers3, Shuffle, type LucideIcon } from "lucide-react"
 
 import type { SidebarResource } from "@/stores/admin-store"
 import { useAdminStore } from "@/stores/admin-store"
@@ -7,6 +7,7 @@ const resourceOptions: Array<{ icon: LucideIcon; label: string; resource: Sideba
   { resource: "keys", label: "API Key", icon: KeyRound },
   { resource: "providers", label: "Provider", icon: Database },
   { resource: "models", label: "Model", icon: Layers3 },
+  { resource: "policies", label: "Policy", icon: Shuffle },
 ]
 
 function SidebarButtonGroup() {

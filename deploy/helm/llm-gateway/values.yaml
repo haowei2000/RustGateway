@@ -10,12 +10,6 @@ gateway:
   metricsPort: 9090
   env:
     RUST_LOG: info
-    OPENAI_BASE_URL: https://api.openai.com
-    OPENAI_KEY_REF: default-openai-key
-  secret:
-    openaiApiKey: ""
-    internalApiKeys: ""
-    internalApiKeyHashes: ""
   resources:
     requests:
       cpu: 500m
@@ -75,6 +69,9 @@ database:
     username: llm
     password: llm
     database: llm_gateway
+    persistence:
+      enabled: false
+      hostPath: /data/llm-gateway/postgres
   resources:
     requests:
       cpu: 100m

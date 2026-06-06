@@ -1,10 +1,12 @@
 mod config;
+mod db;
 mod proxy;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use config::GatewayConfig;
+use db::{new_cache, start_db_thread};
 use pingora_core::{server::configuration::Opt, server::Server, services::listening::Service};
 use proxy::LlmGateway;
 
@@ -12,21 +14,32 @@ fn main() -> Result<()> {
     env_logger::init();
 
     let config = Arc::new(GatewayConfig::from_env()?);
+    let cache = new_cache();
+
+    if let Some(ref database_url) = config.database_url {
+        start_db_thread(cache.clone(), database_url, Duration::from_secs(5));
+        log::info!("DB thread started, waiting for initial cache load...");
+        // Brief wait for the thread to connect and load
+        std::thread::sleep(Duration::from_secs(2));
+    } else {
+        log::warn!("DATABASE_URL not configured — all requests will be rejected");
+    }
+
     log::info!(
-        "starting pingora-gateway on {}, metrics on {}, upstream {}, redis_configured={}, openai_key_ref={}",
+        "starting pingora-gateway on {}, metrics on {}, db_configured={}",
         config.bind_addr,
         config.metrics_bind_addr,
-        config.upstream_base_url,
-        config.redis_url.is_some(),
-        &config.openai_key_ref
+        config.database_url.is_some()
     );
 
     let opt = Opt::parse_args();
     let mut server = Server::new(Some(opt))?;
     server.bootstrap();
 
-    let mut gateway =
-        pingora_proxy::http_proxy_service(&server.configuration, LlmGateway::new(config.clone())?);
+    let mut gateway = pingora_proxy::http_proxy_service(
+        &server.configuration,
+        LlmGateway::new(config.clone(), cache)?,
+    );
     gateway.add_tcp(&config.bind_addr);
     server.add_service(gateway);
 

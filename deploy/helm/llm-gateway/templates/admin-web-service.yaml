@@ -4,10 +4,14 @@ kind: Service
 metadata:
   name: admin-web
 spec:
+  type: {{ .Values.adminWeb.serviceType | default "ClusterIP" }}
   selector:
     app: admin-web
   ports:
     - name: http
       port: 80
       targetPort: http
+      {{- with .Values.adminWeb.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
 {{- end }}

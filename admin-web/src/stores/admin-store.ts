@@ -1,7 +1,7 @@
-import type { ModelType } from "@/lib/api"
+import type { ModelType, RoutingStrategy, RateLimitRule } from "@/lib/api"
 import { create } from "zustand"
 
-export type SidebarResource = "keys" | "providers" | "models"
+export type SidebarResource = "keys" | "providers" | "models" | "policies"
 
 export const NEW_SIDEBAR_ITEM_ID = "__new__"
 
@@ -20,18 +20,27 @@ type ApiKeyDraft = {
   key_name: string
 }
 
+type PolicyDraft = {
+  epichust_model_id: string
+  routing_strategy: RoutingStrategy
+  rate_limit_rules: RateLimitRule[]
+  enabled: boolean
+}
+
 type AdminStore = {
   sidebarResource: SidebarResource
   selectedSidebarItemId: string
   modelDraft: ModelDraft
   providerDraft: ProviderDraft
   apiKeyDraft: ApiKeyDraft
+  policyDraft: PolicyDraft
   generatedApiKey: string
   setSidebarResource: (resource: SidebarResource) => void
   setSelectedSidebarItemId: (id: string) => void
   setModelDraft: (draft: Partial<ModelDraft>) => void
   setProviderDraft: (draft: Partial<ProviderDraft>) => void
   setApiKeyDraft: (draft: Partial<ApiKeyDraft>) => void
+  setPolicyDraft: (draft: Partial<PolicyDraft>) => void
   setGeneratedApiKey: (key: string) => void
 }
 
@@ -49,6 +58,12 @@ export const useAdminStore = create<AdminStore>()((set) => ({
   },
   apiKeyDraft: {
     key_name: "New API Key",
+  },
+  policyDraft: {
+    epichust_model_id: "",
+    routing_strategy: "weighted",
+    rate_limit_rules: [],
+    enabled: true,
   },
   generatedApiKey: "",
   setSidebarResource: (resource) =>
@@ -68,6 +83,10 @@ export const useAdminStore = create<AdminStore>()((set) => ({
   setApiKeyDraft: (draft) =>
     set((state) => ({
       apiKeyDraft: { ...state.apiKeyDraft, ...draft },
+    })),
+  setPolicyDraft: (draft) =>
+    set((state) => ({
+      policyDraft: { ...state.policyDraft, ...draft },
     })),
   setGeneratedApiKey: (key) => set({ generatedApiKey: key }),
 }))

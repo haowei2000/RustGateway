@@ -1,0 +1,64 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start dev infra (Postgres + Redis)",
+      "type": "shell",
+      "command": "make dev-infra",
+      "isBackground": false,
+      "problemMatcher": []
+    },
+    {
+      "label": "Stop dev infra",
+      "type": "shell",
+      "command": "make stop",
+      "isBackground": false,
+      "problemMatcher": []
+    },
+    {
+      "label": "Start admin-web dev server",
+      "type": "shell",
+      "command": "cd admin-web && npm run dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(warning|error)\\s+(\\w+)\\s*:\\s*(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE.*ready",
+          "endsPattern": "VITE.*ready"
+        }
+      }
+    },
+    {
+      "label": "cargo check",
+      "type": "shell",
+      "command": "cargo check --workspace",
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "cargo build",
+      "type": "shell",
+      "command": "cargo build --workspace",
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "cargo clippy",
+      "type": "shell",
+      "command": "cargo clippy --workspace",
+      "group": "test",
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}

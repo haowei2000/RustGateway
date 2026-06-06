@@ -56,6 +56,15 @@ function getSidebarItems(resource: SidebarResource, data: AdminData | undefined)
     }))
   }
 
+  if (resource === "policies") {
+    return data.policies.map((policy) => ({
+      id: policy.id,
+      eyebrow: policy.routing_strategy,
+      meta: `${policy.routes.length} routes · ${policy.rate_limit_rules.length} rules`,
+      title: policy.epichust_model_name,
+    }))
+  }
+
   return data.models.map((model) => ({
     id: model.id,
     eyebrow: model.model_type,
@@ -67,12 +76,14 @@ function getSidebarItems(resource: SidebarResource, data: AdminData | undefined)
 function getItemListTitle(resource: SidebarResource) {
   if (resource === "keys") return "API Keys"
   if (resource === "providers") return "Providers"
+  if (resource === "policies") return "Policies"
   return "Models"
 }
 
 function getAddItemLabel(resource: SidebarResource) {
   if (resource === "keys") return "New API key"
   if (resource === "providers") return "New provider"
+  if (resource === "policies") return "New policy"
   return "New model"
 }
 

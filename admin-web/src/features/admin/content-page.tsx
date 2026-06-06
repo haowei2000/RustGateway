@@ -6,6 +6,7 @@ import { useAdminStore } from "@/stores/admin-store"
 
 import { ApiKeyPage } from "./api-key-page"
 import { ModelPage } from "./model-page"
+import { PolicyPage } from "./policy-page"
 import { ProviderPage } from "./provider-page"
 
 function ContentPage() {
@@ -44,6 +45,14 @@ function ContentPage() {
       ) : null}
       {sidebarResource === "models" ? (
         <ModelPage
+          data={adminData.data}
+          isFetching={adminData.isFetching}
+          selectedItemId={selectedSidebarItemId}
+          onRefresh={() => adminData.refetch()}
+        />
+      ) : null}
+      {sidebarResource === "policies" ? (
+        <PolicyPage
           data={adminData.data}
           isFetching={adminData.isFetching}
           selectedItemId={selectedSidebarItemId}

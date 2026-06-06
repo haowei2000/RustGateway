@@ -4,44 +4,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-### Rust (workspace root)
-
+### Prerequisites (one-time)
 ```bash
-brew install cmake           # required for Pingora on macOS (one-time)
-cargo fmt --all
-cargo check --workspace
-cargo build --workspace
-cargo clippy --workspace
+brew install cmake               # required for Pingora on macOS
+cd admin-web && npm install
 ```
 
-Run a single crate:
+### Local dev (recommended daily workflow)
 ```bash
+make dev            # start Postgres, Redis, admin-api, admin-web
+make dev-debug      # same, with RUST_LOG=debug + RUST_BACKTRACE=1
+make stop           # stop everything
+```
+
+Individual components:
+```bash
+make dev-infra      # start only Postgres + Redis in Docker
+make dev-api        # start admin-api (RUST_LOG=info)
+make dev-api-debug  # start admin-api (RUST_LOG=debug, SQL queries visible)
+make dev-web        # start admin-web (Vite HMR on :5173)
+```
+
+### Debugging in VSCode
+- `Debug admin-api` — launch with lldb, breakpoints, RUST_LOG=debug
+- `Debug admin-web (Chrome)` — launch Chrome with source maps
+- See `.vscode/launch.json` and `.vscode/tasks.json`
+
+### K8s deployment (Helm + kind)
+```bash
+make helm-up        # create kind cluster, build images, deploy
+make helm-down      # tear down
+
+# Manual port-forward after deploy:
+kubectl port-forward svc/admin-api 9000:9000 &
+kubectl port-forward svc/admin-web 3000:80 &
+```
+
+### Rust (workspace root)
+```bash
+cargo fmt --all
+make check          # cargo check --workspace
+make build          # cargo build --workspace
+make lint           # cargo clippy --workspace
+
 cargo run -p axum-admin-api
 cargo run -p pingora-gateway
 ```
 
 ### Frontend (admin-web/)
-
 ```bash
 cd admin-web
-npm install
-npm run dev      # dev server on :3000
-npm run build    # tsc + vite build
+npm run dev         # dev server on :5173
+npm run build       # tsc + vite build
 npm run lint
 ```
 
-### Full stack (Docker)
-
-```bash
-cp .env.example .env         # fill in OPENAI_API_KEY
-docker compose -f deploy/docker-compose.yml up -d --build
-```
-
-Service endpoints:
+### Service endpoints
+- Admin Web: `http://localhost:5173/admin/` (local dev) or `http://localhost:3000/admin/` (K8s)
+- Admin API + Swagger UI: `http://localhost:9000` (`/docs` for OpenAPI)
 - Gateway proxy: `http://localhost:8080`
 - Gateway metrics (Prometheus): `http://localhost:9090`
-- Admin API + Swagger UI: `http://localhost:9000` (`/docs` for OpenAPI)
-- Admin Web: `http://localhost:3000`
 
 ## Architecture
 
@@ -71,7 +93,7 @@ Axum REST API, backed by PostgreSQL via `sqlx` (no ORM — raw SQL in `repositor
 
 ### Admin web — `admin-web/` (React + Vite + TypeScript)
 
-Single-page app, no router. Navigation state lives in Zustand (`stores/admin-store.ts`): `sidebarResource` ("keys" | "providers" | "models") and `selectedSidebarItemId` drive which page renders.
+Single-page app, no router. Navigation state lives in Zustand (`stores/admin-store.ts`): `sidebarResource` ("keys" | "providers" | "models" | "policies") and `selectedSidebarItemId` drive which page renders.
 
 All API calls go through `lib/api.ts`. TanStack Query is used for server state: there is **one primary query** (`getAdminData`, key `["admin-data"]`) that fetches everything; mutations invalidate this query on success. Hooks are in `hooks/use-admin-data.ts`.
 
@@ -79,16 +101,17 @@ UI is shadcn/ui components under `components/ui/`, with layout pieces in `compon
 
 ### Database schema
 
-Six main tables in PostgreSQL (`deploy/sql/001_init.sql`):
+PostgreSQL tables across three migration files (`deploy/sql/`):
 
 ```
 epichust_models          — business-facing models (e.g. "epichust-chat")
 providers                — upstream API providers (key stored as ciphertext)
 provider_models          — models discovered/registered per provider
-model_mappings           — links epichust_model ↔ provider_model
+mapping_policies         — routing policy: strategy, enabled, model binding
+mapping_policy_routes    — weighted/priority routing rows per policy
+rate_limit_rules         — per-policy rate limits (multiple types allowed)
+api_key_mapping_policies — links API keys to mapping policies
 epichust_api_keys        — client API keys (stored as SHA-256 hash + prefix)
-api_key_model_configs    — per-key per-model quota + routing config
-api_key_model_routes     — weighted/priority routing rows within a config
 audit_logs               — one row per proxied request
 ```
 

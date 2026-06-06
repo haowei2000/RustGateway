@@ -1,0 +1,51 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+      image_tag:
+        description: Image tag (default = latest)
+        type: string
+        default: latest
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  RELEASE_NAME: llm-gateway
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Helm deploy
+        run: |
+          TAG=${{ inputs.image_tag }}
+          helm upgrade --install ${{ env.RELEASE_NAME }} deploy/helm/llm-gateway \
+            --set gateway.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:${TAG} \
+            --set adminApi.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:${TAG} \
+            --set adminWeb.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:${TAG} \
+            --wait --timeout 5m
+
+      - name: Verify
+        run: |
+          kubectl get pods -l app.kubernetes.io/instance=${{ env.RELEASE_NAME }}
+          kubectl rollout status deployment pingora-gateway admin-api admin-web --timeout=3m

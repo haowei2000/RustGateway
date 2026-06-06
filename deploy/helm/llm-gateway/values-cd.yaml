@@ -1,0 +1,34 @@
+# CD deployment values — uses GHCR images, external DB/Redis
+# Override with: helm install ... -f values.yaml -f values-cd.yaml
+
+gateway:
+  image: ghcr.io/haowei2000/rustgateway/gateway:latest
+  replicas: 2
+  serviceType: ClusterIP
+
+adminApi:
+  image: ghcr.io/haowei2000/rustgateway/admin-api:latest
+  replicas: 2
+  serviceType: ClusterIP
+
+adminWeb:
+  image: ghcr.io/haowei2000/rustgateway/admin-web:latest
+  replicas: 1
+  serviceType: ClusterIP
+
+redis:
+  mode: external
+  urlSecretName: llm-gateway-redis-secret
+  urlSecretKey: REDIS_URL
+
+database:
+  mode: external
+  urlSecretName: llm-gateway-db-secret
+  urlSecretKey: DATABASE_URL
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true
+    secretName: llm-gateway-tls

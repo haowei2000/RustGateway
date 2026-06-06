@@ -40,6 +40,7 @@ jobs:
         run: |
           TAG=${{ inputs.image_tag }}
           helm upgrade --install ${{ env.RELEASE_NAME }} deploy/helm/llm-gateway \
+            -f deploy/helm/llm-gateway/values-vps.yaml \
             --set gateway.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:${TAG} \
             --set adminApi.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:${TAG} \
             --set adminWeb.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:${TAG} \

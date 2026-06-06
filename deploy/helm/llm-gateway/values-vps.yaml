@@ -1,0 +1,44 @@
+# VPS single-node deployment — bundled Postgres + Redis, GHCR images, NodePort
+
+gateway:
+  image: ghcr.io/haowei2000/rustgateway/gateway:latest
+  replicas: 1
+  serviceType: NodePort
+  nodePorts:
+    http: 30080
+    metrics: 30909
+
+adminApi:
+  image: ghcr.io/haowei2000/rustgateway/admin-api:latest
+  replicas: 1
+  serviceType: NodePort
+  nodePort: 30900
+  env:
+    DATABASE_AUTO_MIGRATE: "true"
+  secret:
+    jwtSecret: "change-me-in-production"
+
+adminWeb:
+  image: ghcr.io/haowei2000/rustgateway/admin-web:latest
+  replicas: 1
+  serviceType: NodePort
+  nodePort: 30300
+
+redis:
+  mode: local
+  image: redis:7-alpine
+  urlSecretName: llm-gateway-secret
+  urlSecretKey: REDIS_URL
+
+database:
+  mode: local
+  image: postgres:16-alpine
+  urlSecretName: llm-gateway-secret
+  urlSecretKey: DATABASE_URL
+  local:
+    username: llm
+    password: llm
+    database: llm_gateway
+    persistence:
+      enabled: true
+      hostPath: /data/llm-gateway-postgres

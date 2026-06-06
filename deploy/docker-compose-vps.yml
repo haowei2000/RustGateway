@@ -1,0 +1,61 @@
+# VPS deployment — single server with Docker Compose
+# Usage:
+#   docker compose -f deploy/docker-compose-vps.yml up -d
+#   docker compose -f deploy/docker-compose-vps.yml pull  # update images
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: llm
+      POSTGRES_PASSWORD: llm
+      POSTGRES_DB: llm_gateway
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  gateway:
+    image: ghcr.io/haowei2000/rustgateway/gateway:latest
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
+      REDIS_URL: redis://redis:6379
+      RUST_LOG: info
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  admin-api:
+    image: ghcr.io/haowei2000/rustgateway/admin-api:latest
+    ports:
+      - "9000:9000"
+    environment:
+      DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
+      REDIS_URL: redis://redis:6379
+      DATABASE_AUTO_MIGRATE: "true"
+      JWT_SECRET: "change-me-in-production"
+      RUST_LOG: info
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  admin-web:
+    image: ghcr.io/haowei2000/rustgateway/admin-web:latest
+    ports:
+      - "3000:80"
+    depends_on:
+      - admin-api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

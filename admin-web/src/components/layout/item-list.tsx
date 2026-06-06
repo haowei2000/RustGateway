@@ -1,11 +1,13 @@
-import { Plus } from "lucide-react"
+import { Plus, type LucideIcon } from "lucide-react"
 
 import { Item, ItemDetail, ItemEyebrow, ItemMeta, ItemTitle } from "@/components/ui/item"
 
 export type ItemListItem = {
   eyebrow?: string
+  icon?: LucideIcon
   id: string
   meta?: string
+  prefixClass?: string
   title: string
 }
 
@@ -60,6 +62,11 @@ function ItemList({
               selected={isSelected}
               onClick={() => onSelect(item.id)}
             >
+              {item.icon ? (
+                <item.icon className="icon-sm shrink-0 opacity-60" aria-hidden="true" />
+              ) : item.prefixClass ? (
+                <span className={`resource-dot ${item.prefixClass}`} />
+              ) : null}
               <ItemTitle>{item.title}</ItemTitle>
               {item.eyebrow || item.meta ? (
                 <ItemDetail>

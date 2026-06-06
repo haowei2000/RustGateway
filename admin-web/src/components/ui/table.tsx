@@ -11,18 +11,18 @@ function Table({ className, ...props }: React.HTMLAttributes<HTMLTableElement>) 
 }
 
 function TableHeader({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("[&_tr]:border-b", className)} {...props} />
+  return <thead className={cn("bg-[#DDDDDD]/50", className)} {...props} />
 }
 
 function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody className={cn("[&_tr:last-child]:border-0", className)} {...props} />
+  return <tbody className={cn("", className)} {...props} />
 }
 
 function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
       className={cn(
-        "border-b border-border transition-colors hover:bg-muted/60 data-[state=selected]:bg-muted",
+        "transition-colors hover:bg-[#DDDDDD]/40 even:bg-[#DDDDDD]/20",
         className,
       )}
       {...props}

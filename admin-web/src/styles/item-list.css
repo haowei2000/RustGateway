@@ -65,8 +65,7 @@
   padding: 0.3rem 0.45rem;
   opacity: 0;
   color: var(--sidebar-accent-foreground);
-  background: var(--sidebar-accent);
-  border: 1px solid color-mix(in oklch, var(--sidebar-muted) 20%, transparent);
+  background: #1a1a1a;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 20px rgb(0 0 0 / 0.18);
    @apply text-xs;
@@ -94,8 +93,21 @@
 .item-list-empty {
   margin: 0;
   padding: 0.875rem;
-  color: var(--sidebar-muted);
-  border: 1px dashed color-mix(in oklch, var(--sidebar-muted) 35%, transparent);
+  color: #999999;
+  background: rgba(255,255,255,0.04);
   border-radius: var(--radius-lg);
    @apply text-sm;
 }
+
+/* Per-resource sidebar item dots */
+.resource-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  margin-right: 0.375rem;
+}
+.resource-dot-keys       { background: #CB2957; }
+.resource-dot-providers { background: #CB2957; opacity: 0.8; }
+.resource-dot-models     { background: #000000; }
+.resource-dot-policies   { background: #CB2957; opacity: 0.6; }

@@ -3,11 +3,11 @@ import { Database, KeyRound, Layers3, Shuffle, type LucideIcon } from "lucide-re
 import type { SidebarResource } from "@/stores/admin-store"
 import { useAdminStore } from "@/stores/admin-store"
 
-const resourceOptions: Array<{ icon: LucideIcon; label: string; resource: SidebarResource }> = [
-  { resource: "keys", label: "API Key", icon: KeyRound },
-  { resource: "providers", label: "Provider", icon: Database },
-  { resource: "models", label: "Model", icon: Layers3 },
-  { resource: "policies", label: "Policy", icon: Shuffle },
+const resourceOptions: Array<{ icon: LucideIcon; label: string; resource: SidebarResource; className: string }> = [
+  { resource: "keys", label: "API Key", icon: KeyRound, className: "sidebar-group-btn-keys" },
+  { resource: "providers", label: "Provider", icon: Database, className: "sidebar-group-btn-providers" },
+  { resource: "models", label: "Model", icon: Layers3, className: "sidebar-group-btn-models" },
+  { resource: "policies", label: "Policy", icon: Shuffle, className: "sidebar-group-btn-policies" },
 ]
 
 function SidebarButtonGroup() {
@@ -25,7 +25,7 @@ function SidebarButtonGroup() {
             key={item.resource}
             aria-label={item.label}
             aria-pressed={isActive}
-            className={isActive ? "sidebar-group-button active" : "sidebar-group-button"}
+            className={isActive ? `sidebar-group-button active ${item.className}` : "sidebar-group-button"}
             type="button"
             onClick={() => setSidebarResource(item.resource)}
           >

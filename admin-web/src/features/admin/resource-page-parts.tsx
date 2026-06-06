@@ -19,6 +19,7 @@ type ResourcePageHeaderProps = {
   icon: LucideIcon
   isFetching: boolean
   status?: string
+  statusVariant?: "success" | "secondary" | "outline" | "default" | "warning"
   title: string
   onRefresh: () => void
 }
@@ -28,6 +29,7 @@ function ResourcePageHeader({
   icon: Icon,
   isFetching,
   status,
+  statusVariant = "secondary",
   title,
   onRefresh,
 }: ResourcePageHeaderProps) {
@@ -42,7 +44,7 @@ function ResourcePageHeader({
             <div className="resource-title-group">
               <div className="resource-title-row">
                 <CardTitle className="resource-title">{title}</CardTitle>
-                {status ? <Badge variant={status === "enabled" ? "success" : "secondary"}>{status}</Badge> : null}
+                {status ? <Badge variant={status === "enabled" ? "success" : statusVariant}>{status}</Badge> : null}
               </div>
               <p className="resource-description">{description}</p>
             </div>

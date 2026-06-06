@@ -9,7 +9,6 @@
   padding: 0.75rem;
   color: var(--sidebar-foreground);
   background: var(--sidebar);
-  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-button-group {
@@ -17,8 +16,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.25rem;
   padding: 0.25rem;
-  background: color-mix(in oklch, var(--sidebar-accent) 45%, transparent);
-  border: 1px solid color-mix(in oklch, var(--sidebar-muted) 18%, transparent);
+  background: rgba(255,255,255,0.06);
   border-radius: var(--radius-lg);
 }
 
@@ -47,6 +45,11 @@
   background: var(--sidebar-accent);
 }
 
+.sidebar-group-button.active.sidebar-group-btn-keys       { color: #CB2957; background: rgba(203,41,87,0.18); }
+.sidebar-group-button.active.sidebar-group-btn-providers { color: #CB2957; background: rgba(203,41,87,0.14); }
+.sidebar-group-button.active.sidebar-group-btn-models     { color: #EEEEEE; background: rgba(255,255,255,0.08); }
+.sidebar-group-button.active.sidebar-group-btn-policies   { color: #CB2957; background: rgba(203,41,87,0.22); }
+
 .sidebar-group-label {
   position: absolute;
   top: calc(100% + 0.45rem);
@@ -55,8 +58,7 @@
   padding: 0.3rem 0.45rem;
   opacity: 0;
   color: var(--sidebar-accent-foreground);
-  background: var(--sidebar-accent);
-  border: 1px solid color-mix(in oklch, var(--sidebar-muted) 20%, transparent);
+  background: #1a1a1a;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 20px rgb(0 0 0 / 0.18);
    @apply text-xs;
@@ -77,8 +79,6 @@
 
 @media (min-width: 1024px) {
   .sidebar {
-    border-right: 1px solid var(--border);
-    border-bottom: 0;
     overflow: visible;
   }
 }

@@ -3,6 +3,7 @@ use std::env;
 use anyhow::Result;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GatewayConfig {
     pub bind_addr: String,
     pub metrics_bind_addr: String,

@@ -12,7 +12,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository }}
+  IMAGE_PREFIX: ${{ github.repository_owner }}/rustgateway
 
 jobs:
   # ── Rust check + fmt + test ─────────────────────────────────────
@@ -52,8 +52,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      SHORT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set SHORT_SHA (first 7 chars)
+        run: echo "SHORT_SHA=${SHORT_SHA::7}" >> $GITHUB_ENV
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -65,20 +70,20 @@ jobs:
       - name: Build & push gateway
         run: |
           docker build -f gateway/Dockerfile \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:${SHORT_SHA} \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:latest .
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway --all-tags
 
       - name: Build & push admin-api
         run: |
           docker build -f admin-api/Dockerfile \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:${SHORT_SHA} \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:latest .
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api --all-tags
 
       - name: Build & push admin-web
         run: |
           docker build -f admin-web/Dockerfile \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:${SHORT_SHA} \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:latest .
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web --all-tags

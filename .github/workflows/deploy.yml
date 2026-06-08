@@ -3,11 +3,6 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: Target environment
-        type: choice
-        options: [staging, production]
-        default: staging
       image_tag:
         description: Image tag (default = latest)
         type: string
@@ -16,37 +11,37 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
-  RELEASE_NAME: llm-gateway
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/llm-gateway
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
+            echo "==> Pulling latest deploy config..."
+            git pull
 
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+            echo "==> Pulling images..."
+            docker compose -f deploy/docker-compose-vps.yml pull
 
-      - name: Helm deploy
-        run: |
-          TAG=${{ inputs.image_tag }}
-          helm upgrade --install ${{ env.RELEASE_NAME }} deploy/helm/llm-gateway \
-            -f deploy/helm/llm-gateway/values-vps.yaml \
-            --set gateway.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/gateway:${TAG} \
-            --set adminApi.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-api:${TAG} \
-            --set adminWeb.image=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/admin-web:${TAG} \
-            --wait --timeout 5m
+            echo "==> Restarting services..."
+            docker compose -f deploy/docker-compose-vps.yml up -d --remove-orphans
 
-      - name: Verify
-        run: |
-          kubectl get pods -l app.kubernetes.io/instance=${{ env.RELEASE_NAME }}
-          kubectl rollout status deployment pingora-gateway admin-api admin-web --timeout=3m
+            echo "==> Waiting for healthy..."
+            sleep 15
+
+            echo "==> Status:"
+            docker compose -f deploy/docker-compose-vps.yml ps
+
+            echo "==> Pruning old images..."
+            docker image prune -af

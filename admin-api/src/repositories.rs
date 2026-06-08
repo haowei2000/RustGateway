@@ -7,8 +7,8 @@ use llm_gateway_common::{
         CreateApiKeyRequest, CreateApiKeyResponse, CreateEpichustModelRequest,
         CreateMappingPolicyRequest, CreateProviderModelRequest, CreateProviderRequest,
         CreateProviderResponse, EpichustModel, MappingPolicy, MappingPolicyRoute, ModelType,
-        ProviderModel, ProviderSummary, RateLimitRule, RoutingStrategy,
-        UpdateMappingPolicyRequest, UsageLimitType,
+        ProviderModel, ProviderSummary, RateLimitRule, RoutingStrategy, UpdateMappingPolicyRequest,
+        UsageLimitType,
     },
 };
 use sqlx::{PgPool, Row};
@@ -231,9 +231,7 @@ const MAPPING_POLICY_SELECT: &str = r#"
 "#;
 
 pub async fn list_mapping_policies(pool: &PgPool) -> Result<Vec<MappingPolicy>, sqlx::Error> {
-    let policy_rows = sqlx::query(MAPPING_POLICY_SELECT)
-        .fetch_all(pool)
-        .await?;
+    let policy_rows = sqlx::query(MAPPING_POLICY_SELECT).fetch_all(pool).await?;
 
     let policy_ids: Vec<String> = policy_rows
         .iter()
@@ -370,19 +368,22 @@ pub async fn update_mapping_policy(
             "#,
         )
         .bind(id)
-        .bind(request.routing_strategy.as_ref().map(routing_strategy_to_str))
+        .bind(
+            request
+                .routing_strategy
+                .as_ref()
+                .map(routing_strategy_to_str),
+        )
         .bind(request.enabled)
         .execute(&mut *tx)
         .await?;
     }
 
     if let Some(rules) = &request.rate_limit_rules {
-        sqlx::query(
-            r#"DELETE FROM rate_limit_rules WHERE mapping_policy_id = $1"#,
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query(r#"DELETE FROM rate_limit_rules WHERE mapping_policy_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
 
         for rule in rules {
             sqlx::query(
@@ -403,12 +404,10 @@ pub async fn update_mapping_policy(
     }
 
     if let Some(routes) = &request.routes {
-        sqlx::query(
-            r#"DELETE FROM mapping_policy_routes WHERE mapping_policy_id = $1"#,
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query(r#"DELETE FROM mapping_policy_routes WHERE mapping_policy_id = $1"#)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
 
         for route in routes {
             sqlx::query(
@@ -576,10 +575,13 @@ async fn load_rate_limit_rules_bulk(
     let mut rules_by_policy = HashMap::<String, Vec<RateLimitRule>>::new();
     for row in &rows {
         let policy_id: String = row.try_get("mapping_policy_id")?;
-        rules_by_policy.entry(policy_id).or_default().push(RateLimitRule {
-            limit_type: parse_usage_limit_type(row.try_get::<String, _>("limit_type").unwrap()),
-            limit_value: row.try_get("limit_value").unwrap_or(100),
-        });
+        rules_by_policy
+            .entry(policy_id)
+            .or_default()
+            .push(RateLimitRule {
+                limit_type: parse_usage_limit_type(row.try_get::<String, _>("limit_type").unwrap()),
+                limit_value: row.try_get("limit_value").unwrap_or(100),
+            });
     }
     Ok(rules_by_policy)
 }
@@ -713,18 +715,24 @@ async fn load_api_key_mapping_policies(
     for row in &rows {
         let api_key_id: String = row.try_get("api_key_id")?;
         let policy_id: String = row.try_get("mapping_policy_id")?;
-        let routes = routes_by_policy.get(&policy_id).cloned().unwrap_or_default();
+        let routes = routes_by_policy
+            .get(&policy_id)
+            .cloned()
+            .unwrap_or_default();
         let rate_limit_rules = rules_by_policy.get(&policy_id).cloned().unwrap_or_default();
 
-        policies_by_key.entry(api_key_id).or_default().push(ApiKeyMappingPolicy {
-            mapping_policy_id: policy_id,
-            epichust_model_id: row.try_get("epichust_model_id")?,
-            epichust_model_name: row.try_get("epichust_model_name")?,
-            routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
-            rate_limit_rules,
-            enabled: row.try_get("link_enabled")?,
-            routes,
-        });
+        policies_by_key
+            .entry(api_key_id)
+            .or_default()
+            .push(ApiKeyMappingPolicy {
+                mapping_policy_id: policy_id,
+                epichust_model_id: row.try_get("epichust_model_id")?,
+                epichust_model_name: row.try_get("epichust_model_name")?,
+                routing_strategy: parse_routing_strategy(row.try_get("routing_strategy")?),
+                rate_limit_rules,
+                enabled: row.try_get("link_enabled")?,
+                routes,
+            });
     }
 
     Ok(policies_by_key)

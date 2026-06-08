@@ -64,7 +64,11 @@ fn api_routes() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(provider_available_models))
         .routes(routes!(provider_models, create_provider_model))
         .routes(routes!(mapping_policies, create_mapping_policy))
-        .routes(routes!(get_mapping_policy, update_mapping_policy, delete_mapping_policy))
+        .routes(routes!(
+            get_mapping_policy,
+            update_mapping_policy,
+            delete_mapping_policy
+        ))
         .routes(routes!(audit_logs))
 }
 

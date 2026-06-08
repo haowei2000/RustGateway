@@ -41,12 +41,13 @@ pub fn new_cache() -> Cache {
 // ── DB queries ────────────────────────────────────────────────────
 
 async fn load_key_hashes(pool: &PgPool) -> Result<HashSet<String>> {
-    let rows = sqlx::query(
-        "SELECT key_hash FROM epichust_api_keys WHERE enabled = true",
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.iter().map(|r| r.try_get::<String, _>("key_hash").unwrap()).collect())
+    let rows = sqlx::query("SELECT key_hash FROM epichust_api_keys WHERE enabled = true")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("key_hash").unwrap())
+        .collect())
 }
 
 /// Load model mappings: epichust_model_name → (provider_model_name, provider info).

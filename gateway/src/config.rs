@@ -15,12 +15,8 @@ impl GatewayConfig {
         Ok(Self {
             bind_addr: env_or("GATEWAY_BIND_ADDR", "0.0.0.0:8080"),
             metrics_bind_addr: env_or("METRICS_BIND_ADDR", "0.0.0.0:9090"),
-            database_url: env::var("DATABASE_URL")
-                .ok()
-                .filter(|v| !v.is_empty()),
-            redis_url: env::var("REDIS_URL")
-                .ok()
-                .filter(|v| !v.is_empty()),
+            database_url: env::var("DATABASE_URL").ok().filter(|v| !v.is_empty()),
+            redis_url: env::var("REDIS_URL").ok().filter(|v| !v.is_empty()),
         })
     }
 }

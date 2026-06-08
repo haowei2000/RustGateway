@@ -7,16 +7,16 @@ set -e
 echo "==> Installing Docker..."
 command -v docker &>/dev/null || curl -fsSL https://get.docker.com | sh
 
-echo "==> Creating project directory..."
-mkdir -p /opt/llm-gateway/backups
-
-echo "==> Cloning repo (deploy files only)..."
-cd /opt/llm-gateway
-if [ -d .git ]; then
-  git pull
+echo "==> Cloning repo..."
+if [ -d /opt/llm-gateway/.git ]; then
+  cd /opt/llm-gateway && git pull
 else
-  git clone --depth 1 https://github.com/haowei2000/RustGateway.git .
+  rm -rf /opt/llm-gateway
+  git clone --depth 1 https://github.com/haowei2000/RustGateway.git /opt/llm-gateway
 fi
+
+cd /opt/llm-gateway
+mkdir -p deploy/backups
 
 echo "==> Setup done!"
 echo ""

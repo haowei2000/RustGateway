@@ -110,14 +110,17 @@ pub fn start_db_thread(cache: Cache, database_url: &str, interval: Duration) {
             .expect("tokio runtime");
 
         rt.block_on(async {
-            let pool = match PgPool::connect(&url).await {
-                Ok(p) => {
-                    log::info!("gateway connected to PostgreSQL");
-                    p
-                }
-                Err(e) => {
-                    log::error!("failed to connect to PostgreSQL: {e}");
-                    return;
+            // Retry connecting for up to 60s (e.g. Postgres container still starting)
+            let pool = loop {
+                match PgPool::connect(&url).await {
+                    Ok(p) => {
+                        log::info!("gateway connected to PostgreSQL");
+                        break p;
+                    }
+                    Err(e) => {
+                        log::warn!("DB connection failed, retrying in 3s: {e}");
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
                 }
             };
 

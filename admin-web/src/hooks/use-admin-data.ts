@@ -7,9 +7,14 @@ import {
   createMappingPolicy,
   createProvider,
   createProviderModel,
+  deleteApiKey,
+  deleteEpichustModel,
   deleteMappingPolicy,
+  deleteProvider,
   detachApiKeyMappingPolicy,
   getAdminData,
+  rotateApiKey,
+  updateApiKey,
   updateMappingPolicy,
   type AttachApiKeyMappingPolicyRequest,
   type CreateApiKeyRequest,
@@ -140,6 +145,62 @@ export function useDetachApiKeyMappingPolicy() {
       apiKeyId: string
       mappingPolicyId: string
     }) => detachApiKeyMappingPolicy(apiKeyId, mappingPolicyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useUpdateApiKey() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: { key_name: string; enabled: boolean } }) =>
+      updateApiKey(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useDeleteApiKey() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => deleteApiKey(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useDeleteProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => deleteProvider(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useDeleteEpichustModel() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => deleteEpichustModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useRotateApiKey() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => rotateApiKey(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
     },

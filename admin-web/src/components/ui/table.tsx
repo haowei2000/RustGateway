@@ -11,7 +11,7 @@ function Table({ className, ...props }: React.HTMLAttributes<HTMLTableElement>) 
 }
 
 function TableHeader({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("bg-[#DDDDDD]/50", className)} {...props} />
+  return <thead className={cn("bg-secondary/50", className)} {...props} />
 }
 
 function TableBody({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
@@ -22,7 +22,7 @@ function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElem
   return (
     <tr
       className={cn(
-        "transition-colors hover:bg-[#DDDDDD]/40 even:bg-[#DDDDDD]/20",
+        "transition-colors hover:bg-secondary/40 even:bg-secondary/20",
         className,
       )}
       {...props}

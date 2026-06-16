@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 // ── Short Item (sidebar) ──────────────────────────────────────────
 
 const itemVariants = cva(
-  "group relative grid grid-cols-[auto_minmax(0,1fr)] min-h-8 w-full items-center rounded-md px-2 text-left transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+  "group relative flex h-9 w-full items-center gap-x-2.5 rounded-md px-2 text-left transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
   {
     variants: {
       selected: {
@@ -24,6 +24,14 @@ export type ItemProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
 
 function Item({ className, selected, ...props }: ItemProps) {
   return <button className={cn(itemVariants({ selected, className }))} type="button" {...props} />
+}
+
+function ItemIcon({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
+  return <span className={cn("flex shrink-0 items-center justify-center w-5", className)} {...props} />
+}
+
+function ItemContent({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
+  return <span className={cn("min-w-0 flex-1 truncate", className)} {...props} />
 }
 
 function ItemTitle({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
@@ -56,7 +64,7 @@ function LongItem({ className, children, ...props }: React.HTMLAttributes<HTMLDi
   return (
     <div
       className={cn(
-        "flex min-h-12 w-full items-center gap-3 rounded-md bg-[#DDDDDD]/60 px-3 py-2.5",
+        "flex min-h-12 w-full items-center gap-3 rounded-md bg-secondary/60 px-3 py-2.5",
         className,
       )}
       {...props}
@@ -87,6 +95,6 @@ function LongItemActions({ className, ...props }: React.HTMLAttributes<HTMLDivEl
 }
 
 export {
-  Item, ItemDetail, ItemEyebrow, ItemMeta, ItemTitle,
+  Item, ItemContent, ItemDetail, ItemEyebrow, ItemIcon, ItemMeta, ItemTitle,
   LongItem, LongItemIcon, LongItemBody, LongItemTitle, LongItemSubtitle, LongItemActions,
 }

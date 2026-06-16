@@ -294,3 +294,23 @@ export function detachApiKeyMappingPolicy(
     `api-keys/${apiKeyId}/mapping-policies/${mappingPolicyId}`,
   )
 }
+
+export function updateApiKey(id: string, input: { key_name: string; enabled: boolean }) {
+  return requestJson<void>("PUT", `api-keys/${id}`, input)
+}
+
+export function deleteApiKey(id: string) {
+  return requestJson<void>("DELETE", `api-keys/${id}`)
+}
+
+export function rotateApiKey(id: string): Promise<CreateApiKeyResponse> {
+  return requestJson<CreateApiKeyResponse>("PATCH", `api-keys/${id}/rotate`)
+}
+
+export function deleteProvider(id: string) {
+  return requestJson<void>("DELETE", `providers/${id}`)
+}
+
+export function deleteEpichustModel(id: string) {
+  return requestJson<void>("DELETE", `epichust-models/${id}`)
+}

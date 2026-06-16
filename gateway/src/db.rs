@@ -23,10 +23,29 @@ pub struct ModelRoute {
     pub provider: ProviderInfo,
 }
 
+#[derive(Debug, Clone)]
+pub struct RateLimitConfig {
+    pub requests_per_minute: Option<i32>,
+    pub requests_per_day: Option<i32>,
+    pub tokens_per_minute: Option<i32>,
+    pub tokens_per_day: Option<i32>,
+}
+
+impl RateLimitConfig {
+    pub fn is_empty(&self) -> bool {
+        self.requests_per_minute.is_none()
+            && self.requests_per_day.is_none()
+            && self.tokens_per_minute.is_none()
+            && self.tokens_per_day.is_none()
+    }
+}
+
 pub struct GatewayCache {
     pub key_hashes: HashSet<String>,
     /// epichust_model_name → resolved route (first enabled route in first enabled policy)
     pub model_routes: HashMap<String, ModelRoute>,
+    /// key_hash → aggregated rate limit rules from attached policies
+    pub rate_limits: HashMap<String, RateLimitConfig>,
 }
 
 pub type Cache = Arc<RwLock<GatewayCache>>;
@@ -35,6 +54,7 @@ pub fn new_cache() -> Cache {
     Arc::new(RwLock::new(GatewayCache {
         key_hashes: HashSet::new(),
         model_routes: HashMap::new(),
+        rate_limits: HashMap::new(),
     }))
 }
 
@@ -92,10 +112,54 @@ async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelRoute>>
     Ok(map)
 }
 
+/// Load rate limit rules per API key (keyed by key_hash).
+/// Aggregates limits from all enabled policies attached to the key.
+async fn load_rate_limits(pool: &PgPool) -> Result<HashMap<String, RateLimitConfig>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            eak.key_hash,
+            rlr.limit_type,
+            rlr.limit_value
+        FROM epichust_api_keys eak
+        JOIN api_key_mapping_policies akmp ON akmp.api_key_id = eak.id AND akmp.enabled = true
+        JOIN mapping_policies mp ON mp.id = akmp.mapping_policy_id AND mp.enabled = true
+        JOIN rate_limit_rules rlr ON rlr.mapping_policy_id = mp.id
+        WHERE eak.enabled = true
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut map: HashMap<String, RateLimitConfig> = HashMap::new();
+    for row in &rows {
+        let key_hash: String = row.try_get("key_hash")?;
+        let limit_type: String = row.try_get("limit_type")?;
+        let limit_value: i32 = row.try_get("limit_value")?;
+
+        let entry = map.entry(key_hash).or_insert(RateLimitConfig {
+            requests_per_minute: None,
+            requests_per_day: None,
+            tokens_per_minute: None,
+            tokens_per_day: None,
+        });
+
+        match limit_type.as_str() {
+            "requests_per_minute" => entry.requests_per_minute = Some(limit_value),
+            "requests_per_day" => entry.requests_per_day = Some(limit_value),
+            "tokens_per_minute" => entry.tokens_per_minute = Some(limit_value),
+            "tokens_per_day" => entry.tokens_per_day = Some(limit_value),
+            _ => {}
+        }
+    }
+    Ok(map)
+}
+
 async fn load_full_cache(pool: &PgPool) -> Result<GatewayCache> {
     Ok(GatewayCache {
         key_hashes: load_key_hashes(pool).await?,
         model_routes: load_model_routes(pool).await?,
+        rate_limits: load_rate_limits(pool).await?,
     })
 }
 

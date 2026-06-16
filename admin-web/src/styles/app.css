@@ -22,8 +22,29 @@
 
 @media (min-width: 1024px) {
   .app-layout {
-    grid-template-columns: 176px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 200px) 4px minmax(0, 1fr);
   }
+}
+
+.sidebar-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 150ms ease;
+  user-select: none;
+  position: relative;
+}
+
+/* Widen hit area to the right only — never overlap the sidebar */
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 -6px 0 0;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.is-dragging {
+  background: var(--accent);
 }
 
 @keyframes spin {

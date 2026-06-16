@@ -1,29 +1,22 @@
 import { useState } from "react"
-import { Layers3, Loader2, RotateCcw, Save, Shuffle } from "lucide-react"
+import { Layers3, Loader2, Save, Shuffle, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import {
-  LongItem,
-  LongItemBody,
-  LongItemIcon,
-  LongItemSubtitle,
-  LongItemTitle,
-} from "@/components/ui/item"
-import { useCreateEpichustModel } from "@/hooks/use-admin-data"
+import { useCreateEpichustModel, useDeleteEpichustModel } from "@/hooks/use-admin-data"
 import type { AdminData, EpichustModel, ModelType } from "@/lib/api"
-import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
+import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
 
 import {
   EmptyResourcePage,
   ReadOnlyField,
-  ResourceActions,
   ResourceCard,
   ResourceNotice,
   ResourcePageFrame,
   ResourcePageHeader,
+  SubItemList,
+  SubItemRow,
 } from "./resource-page-parts"
 import { formatDate, getSelectedItem } from "./resource-page-utils"
 
@@ -51,9 +44,16 @@ function ModelPageContent({
   const [draft, setDraft] = useState<ModelDraft>(() => createModelDraft(item))
   const [notice, setNotice] = useState("")
   const createMutation = useCreateEpichustModel()
+  const deleteMutation = useDeleteEpichustModel()
   const isNew = !item
+  const { setSidebarResource, setSelectedSidebarItemId } = useAdminStore()
 
   const modelPolicies = item ? data.policies.filter((p) => p.epichust_model_id === item.id) : []
+
+  function navigateToPolicy(policyId: string) {
+    setSidebarResource("policies")
+    setSelectedSidebarItemId(policyId)
+  }
 
   async function handleSave() {
     if (!isNew) return
@@ -70,6 +70,33 @@ function ModelPageContent({
   return (
     <ResourcePageFrame variant="model">
       <ResourcePageHeader
+        actions={
+          <>
+            {!isNew ? (
+              <Button variant="ghost" disabled={deleteMutation.isPending} onClick={async () => {
+                if (!item) return
+                try {
+                  await deleteMutation.mutateAsync(item.id)
+                  setNotice("Model deleted.")
+                  onRefresh()
+                } catch (e) { setNotice(e instanceof Error ? e.message : "Delete failed.") }
+              }}>
+                {deleteMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Trash2 className="icon-sm" />}
+                Delete
+              </Button>
+            ) : null}
+            {isNew ? (
+              <Button disabled={createMutation.isPending} onClick={handleSave}>
+                {createMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                {createMutation.isPending ? "Saving…" : "Create"}
+              </Button>
+            ) : (
+              <Button onClick={() => setNotice("Draft staged locally.")}>
+                <Save className="icon-sm" /> Save
+              </Button>
+            )}
+          </>
+        }
         description={draft.model_type}
         icon={Layers3}
         isFetching={isFetching}
@@ -106,45 +133,26 @@ function ModelPageContent({
         </div>
       </ResourceCard>
 
-      {/* ── Config Part: Associated Policies ── */}
-      <ResourceCard title={`Policies (${modelPolicies.length})`}>
-        <div className="resource-config-list">
-          {modelPolicies.map((policy) => (
-            <LongItem key={policy.id}>
-              <LongItemIcon><Shuffle className="icon-sm" /></LongItemIcon>
-              <LongItemBody>
-                <LongItemTitle>{policy.routing_strategy}</LongItemTitle>
-                <LongItemSubtitle>
-                  {policy.routes.length} routes · {policy.rate_limit_rules.length} rules
-                  {policy.rate_limit_rules.length > 0 && (
-                    <> · {policy.rate_limit_rules.map((r) => `${r.limit_type}: ${r.limit_value}`).join(", ")}</>
-                  )}
-                </LongItemSubtitle>
-              </LongItemBody>
-              <Badge variant={policy.enabled ? "default" : "secondary"}>{policy.enabled ? "enabled" : "disabled"}</Badge>
-            </LongItem>
-          ))}
-          {modelPolicies.length === 0 && (
-            <p className="resource-empty">No policies reference this model. Create a policy to link it to providers.</p>
-          )}
-        </div>
-      </ResourceCard>
+      {/* ── Policies ── */}
+      <SubItemList
+        title={`Policies (${modelPolicies.length})`}
+      >
+        {modelPolicies.map((policy) => {
+          const rulesInfo = policy.rate_limit_rules.length > 0
+            ? ` · ${policy.rate_limit_rules.map((r) => `${r.limit_type}: ${r.limit_value}`).join(", ")}`
+            : ""
+          return (
+            <SubItemRow
+              key={policy.id}
+              icon={Shuffle}
+              title={policy.routing_strategy}
+              subtitle={`${policy.routes.length} routes · ${policy.rate_limit_rules.length} rules${rulesInfo}`}
+              onClick={() => navigateToPolicy(policy.id)}
+            />
+          )
+        })}
+      </SubItemList>
 
-      <ResourceActions>
-        <Button variant="outline" onClick={() => { setDraft(createModelDraft(item)); setNotice("Draft reset.") }}>
-          <RotateCcw className="icon-sm" /> Reset
-        </Button>
-        {isNew ? (
-          <Button disabled={createMutation.isPending} onClick={handleSave}>
-            {createMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
-            {createMutation.isPending ? "Saving…" : "Create model"}
-          </Button>
-        ) : (
-          <Button onClick={() => setNotice("Draft staged locally.")}>
-            <Save className="icon-sm" /> Save draft
-          </Button>
-        )}
-      </ResourceActions>
       {notice && <ResourceNotice>{notice}</ResourceNotice>}
     </ResourcePageFrame>
   )

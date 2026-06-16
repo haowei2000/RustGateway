@@ -1,36 +1,29 @@
 import { useState } from "react"
-import { Ban, KeyRound, Layers3, Loader2, Plus, RotateCcw, Save, Trash2 } from "lucide-react"
+import { BookOpen, Copy, KeyRound, Layers3, Loader2, RefreshCw, Save, Trash2, X } from "lucide-react"
 
+import { AddItemModal } from "@/components/ui/add-item-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import {
-  LongItem,
-  LongItemActions,
-  LongItemBody,
-  LongItemIcon,
-  LongItemSubtitle,
-  LongItemTitle,
-} from "@/components/ui/item"
 import {
   useAttachApiKeyMappingPolicy,
   useCreateApiKey,
+  useDeleteApiKey,
   useDetachApiKeyMappingPolicy,
+  useRotateApiKey,
 } from "@/hooks/use-admin-data"
 import type { AdminData, ApiKeyMappingPolicy, ApiKeySummary, MappingPolicy } from "@/lib/api"
-import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
+import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
 
 import {
-  DangerAction,
-  EmptyBlock,
   EmptyResourcePage,
   ReadOnlyField,
-  ResourceActions,
   ResourceCard,
   ResourceNotice,
   ResourcePageFrame,
   ResourcePageHeader,
+  SubItemList,
+  SubItemRow,
 } from "./resource-page-parts"
 import { formatDate, getSelectedItem } from "./resource-page-utils"
 
@@ -65,20 +58,40 @@ function ApiKeyPageContent({
   data, isFetching, item, onRefresh,
 }: { data: AdminData; isFetching: boolean; item?: ApiKeySummary; onRefresh: () => void }) {
   const [draft, setDraft] = useState<ApiKeyDraft>(() => createApiKeyDraft(item))
-  const [policyToAddId, setPolicyToAddId] = useState("")
+  const [showPolicyModal, setShowPolicyModal] = useState(false)
+  const [showDocsModal, setShowDocsModal] = useState(false)
   const [notice, setNotice] = useState("")
+  const [docsKey, setDocsKey] = useState("")
   const createApiKeyMutation = useCreateApiKey()
   const attachPolicyMutation = useAttachApiKeyMappingPolicy()
   const detachPolicyMutation = useDetachApiKeyMappingPolicy()
+  const deleteApiKeyMutation = useDeleteApiKey()
+  const rotateApiKeyMutation = useRotateApiKey()
+
+  async function handleRotateKey() {
+    if (!item) return
+    try {
+      const result = await rotateApiKeyMutation.mutateAsync(item.id)
+      setDocsKey(result.plaintext_api_key)
+      setNotice(`Key rotated! New key: ${result.plaintext_api_key}`)
+      onRefresh()
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Rotate failed.") }
+  }
+  const { setSidebarResource, setSelectedSidebarItemId } = useAdminStore()
+
+  function navigateToPolicy(policyId: string) {
+    setSidebarResource("policies")
+    setSelectedSidebarItemId(policyId)
+  }
 
   const availablePolicies = attachablePolicies(data, draft)
-  const effectivePolicyToAddId = policyToAddId || availablePolicies[0]?.id || ""
   const isNew = !item
 
   async function handleSave() {
     if (!isNew) return
     try {
       const result = await createApiKeyMutation.mutateAsync({ key_name: draft.key_name.trim() || "New API Key" })
+      setDocsKey(result.plaintext_api_key)
       setNotice(`API key created! Copy your key now: ${result.plaintext_api_key}`)
       onRefresh()
     } catch (error) {
@@ -86,28 +99,28 @@ function ApiKeyPageContent({
     }
   }
 
-  async function addMappingPolicy() {
-    const policy = data.policies.find((c) => c.id === effectivePolicyToAddId)
-    if (!policy) return
-    if (item) {
-      try {
-        await attachPolicyMutation.mutateAsync({ apiKeyId: item.id, input: { mapping_policy_id: policy.id } })
-        setNotice(`Policy "${policy.epichust_model_name}" attached.`)
-        setPolicyToAddId("")
-        onRefresh()
-      } catch (error) { setNotice(error instanceof Error ? error.message : "Failed to attach.") }
-      return
+  async function handleAttachPolicies(selectedIds: string[]) {
+    for (const policyId of selectedIds) {
+      const policy = data.policies.find((c) => c.id === policyId)
+      if (!policy) continue
+      if (item) {
+        try {
+          await attachPolicyMutation.mutateAsync({ apiKeyId: item.id, input: { mapping_policy_id: policy.id } })
+        } catch { /* skip duplicates */ }
+        continue
+      }
+      const mp: ApiKeyMappingPolicy = {
+        enabled: true, mapping_policy_id: policy.id,
+        epichust_model_id: policy.epichust_model_id, epichust_model_name: policy.epichust_model_name,
+        routing_strategy: policy.routing_strategy,
+        rate_limit_rules: (policy.rate_limit_rules ?? []).map((r) => ({ ...r })),
+        routes: policy.routes.map((r) => ({ ...r })),
+      }
+      setDraft((c) => ({ ...c, mappingPolicies: [...c.mappingPolicies, mp] }))
     }
-    const mp: ApiKeyMappingPolicy = {
-      enabled: true, mapping_policy_id: policy.id,
-      epichust_model_id: policy.epichust_model_id, epichust_model_name: policy.epichust_model_name,
-      routing_strategy: policy.routing_strategy,
-      rate_limit_rules: (policy.rate_limit_rules ?? []).map((r) => ({ ...r })),
-      routes: policy.routes.map((r) => ({ ...r })),
-    }
-    setDraft((c) => ({ ...c, mappingPolicies: [...c.mappingPolicies, mp] }))
-    setPolicyToAddId("")
-    setNotice("Mapping policy added to draft.")
+    if (item) onRefresh()
+    setShowPolicyModal(false)
+    setNotice(selectedIds.length > 0 ? `${selectedIds.length} policy attached.` : "")
   }
 
   async function removeMappingPolicy(policyId: string) {
@@ -125,6 +138,38 @@ function ApiKeyPageContent({
   return (
     <ResourcePageFrame variant="key">
       <ResourcePageHeader
+        actions={
+          <>
+            {(docsKey || !isNew) ? (
+              <Button variant="outline" size="sm" onClick={() => setShowDocsModal(true)}>
+                <BookOpen className="icon-sm" /> Docs
+              </Button>
+            ) : null}
+            {!isNew ? (
+              <Button variant="ghost" disabled={deleteApiKeyMutation.isPending} onClick={async () => {
+                if (!item) return
+                try {
+                  await deleteApiKeyMutation.mutateAsync(item.id)
+                  setNotice("API key deleted.")
+                  onRefresh()
+                } catch (e) { setNotice(e instanceof Error ? e.message : "Delete failed.") }
+              }}>
+                {deleteApiKeyMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Trash2 className="icon-sm" />}
+                Delete
+              </Button>
+            ) : null}
+            {isNew ? (
+              <Button disabled={createApiKeyMutation.isPending} onClick={handleSave}>
+                {createApiKeyMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                {createApiKeyMutation.isPending ? "Saving…" : "Create"}
+              </Button>
+            ) : (
+              <Button onClick={() => setNotice("Draft staged locally.")}>
+                <Save className="icon-sm" /> Save
+              </Button>
+            )}
+          </>
+        }
         description={item ? `Hash prefix ${item.key_hash_prefix}` : "New API key draft"}
         icon={KeyRound}
         isFetching={isFetching}
@@ -160,70 +205,116 @@ function ApiKeyPageContent({
             <ReadOnlyField label="Mode" value="New draft" />
           )}
         </div>
+        {item ? (
+          <div className="resource-actions" style={{ marginTop: "0.75rem" }}>
+            <Button variant="outline" size="sm" disabled={rotateApiKeyMutation.isPending} onClick={handleRotateKey}>
+              <RefreshCw className={`icon-sm ${rotateApiKeyMutation.isPending ? "refresh-icon-busy" : ""}`} /> Refresh key
+            </Button>
+          </div>
+        ) : null}
       </ResourceCard>
 
-      {/* ── Config Part: Mapping Policies ── */}
-      <ResourceCard title="Attached Mapping Policies">
-        <div className="resource-config-list">
-          {draft.mappingPolicies.map((mp) => (
-            <LongItem key={mp.mapping_policy_id}>
-              <LongItemIcon><Layers3 className="icon-sm" /></LongItemIcon>
-              <LongItemBody>
-                <LongItemTitle>{mp.epichust_model_name}</LongItemTitle>
-                <LongItemSubtitle>
-                  {mp.routing_strategy} · {mp.routes.length} routes · {mp.rate_limit_rules.length} rules
-                </LongItemSubtitle>
-              </LongItemBody>
-              <Badge variant={mp.enabled ? "default" : "secondary"}>{mp.enabled ? "on" : "off"}</Badge>
-              <LongItemActions>
-                <Button size="sm" variant="ghost" onClick={() => removeMappingPolicy(mp.mapping_policy_id)}>
-                  <Trash2 className="icon-sm" /> Remove
-                </Button>
-              </LongItemActions>
-            </LongItem>
-          ))}
-          {draft.mappingPolicies.length === 0 && <EmptyBlock>No mapping policies attached.</EmptyBlock>}
-        </div>
-        <div className="resource-config-footer">
-          <select className="resource-select" disabled={availablePolicies.length === 0}
-            value={effectivePolicyToAddId} onChange={(e) => setPolicyToAddId(e.target.value)}>
-            {availablePolicies.length > 0 ? (
-              availablePolicies.map((p) => <option key={p.id} value={p.id}>{p.epichust_model_name} ({p.routing_strategy})</option>)
-            ) : (<option value="">All policies attached</option>)}
-          </select>
-          <Button variant="outline" size="sm" disabled={!effectivePolicyToAddId} onClick={addMappingPolicy}>
-            <Plus className="icon-sm" /> Attach policy
-          </Button>
-        </div>
-      </ResourceCard>
+      {/* ── Policies ── */}
+      <SubItemList
+        title="Policies"
+        addLabel="Attach policy"
+        onAdd={() => setShowPolicyModal(true)}
+      >
+        {draft.mappingPolicies.map((mp) => {
+          const policyExists = data.policies.some((p) => p.id === mp.mapping_policy_id)
+          return (
+            <SubItemRow
+              key={mp.mapping_policy_id}
+              icon={Layers3}
+              title={mp.epichust_model_name}
+              onClick={policyExists ? () => navigateToPolicy(mp.mapping_policy_id) : undefined}
+              actions={
+                <span
+                  className="sub-item-action"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); removeMappingPolicy(mp.mapping_policy_id) } }}
+                  onClick={(e) => { e.stopPropagation(); removeMappingPolicy(mp.mapping_policy_id) }}
+                >
+                  <Trash2 className="icon-sm" /> Unattach
+                </span>
+              }
+            />
+          )
+        })}
+      </SubItemList>
 
-      {/* ── Danger Zone ── */}
-      {item && (
-        <DangerAction
-          action={<Button className="resource-danger-button" disabled={!draft.enabled} variant="outline"
-            onClick={() => { setDraft((c) => ({ ...c, enabled: false })); setNotice("Revoke queued.") }}>
-            <Ban className="icon-sm" /> Revoke</Button>}
-          badge="special action"
-          description="Enabled changes to false in the current draft."
-          title="Revoke API key" />
-      )}
-
-      <ResourceActions>
-        <Button variant="outline" onClick={() => { setDraft(createApiKeyDraft(item)); setNotice("Draft reset.") }}>
-          <RotateCcw className="icon-sm" /> Reset
-        </Button>
-        {isNew ? (
-          <Button disabled={createApiKeyMutation.isPending} onClick={handleSave}>
-            {createApiKeyMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
-            {createApiKeyMutation.isPending ? "Saving…" : "Create API key"}
-          </Button>
-        ) : (
-          <Button onClick={() => setNotice("Draft staged locally.")}>
-            <Save className="icon-sm" /> Save draft
-          </Button>
-        )}
-      </ResourceActions>
       {notice && <ResourceNotice>{notice}</ResourceNotice>}
+
+      <AddItemModal
+        confirmLabel="Attach selected"
+        emptyText="All policies already attached."
+        items={availablePolicies.map((p) => ({
+          id: p.id,
+          label: p.epichust_model_name,
+          subtitle: p.routing_strategy,
+        }))}
+        open={showPolicyModal}
+        title="Attach Policies"
+        onClose={() => setShowPolicyModal(false)}
+        onConfirm={handleAttachPolicies}
+      />
+
+      {showDocsModal ? (() => {
+        const key = docsKey || "<your-api-key>"
+        const model = draft.mappingPolicies[0]?.epichust_model_name || "your-model-name"
+        const curlCmd = `curl -X POST http://localhost:8080/v1/chat/completions \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'`
+
+        return (
+        <div className="modal-overlay" onClick={() => setShowDocsModal(false)}>
+          <div className="modal-card" style={{ maxWidth: "42rem" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">API Docs</h3>
+              <button className="modal-close-button" type="button" onClick={() => setShowDocsModal(false)}>
+                <X className="icon-sm" />
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: "0 1rem 1rem" }}>
+              {!docsKey ? (
+                <p style={{ margin: "0 0 0.75rem", padding: "0.5rem 0.75rem", fontSize: "0.8125rem", background: "var(--muted)", borderRadius: "var(--radius-md)", color: "var(--muted-foreground)" }}>
+                  Replace <code style={{ fontSize: "0.8125rem" }}>&lt;your-api-key&gt;</code> with the plaintext key obtained at creation time.
+                </p>
+              ) : null}
+              <p style={{ margin: "0 0 0.75rem", fontSize: "0.875rem", color: "var(--muted-foreground)" }}>
+                Use the key below to call the gateway Chat Completions endpoint:
+              </p>
+              <div style={{ position: "relative" }}>
+                <pre style={{
+                  margin: 0,
+                  padding: "1rem",
+                  background: "var(--muted)",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: "0.8125rem",
+                  lineHeight: 1.6,
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                }}>{curlCmd}</pre>
+                <button
+                  className="modal-close-button"
+                  style={{ position: "absolute", top: "0.5rem", right: "0.5rem" }}
+                  type="button"
+                  onClick={() => { navigator.clipboard.writeText(curlCmd) }}
+                >
+                  <Copy className="icon-sm" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        )
+      })() : null}
     </ResourcePageFrame>
   )
 }

@@ -56,10 +56,10 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 fn api_routes() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::new()
-        .routes(routes!(api_keys, create_api_key))
+        .routes(routes!(api_keys, create_api_key, update_api_key, delete_api_key, rotate_api_key))
         .routes(routes!(attach_api_key_mapping_policy))
         .routes(routes!(detach_api_key_mapping_policy))
-        .routes(routes!(epichust_models, create_epichust_model))
+        .routes(routes!(epichust_models, create_epichust_model, delete_epichust_model))
         .routes(routes!(providers, create_provider))
         .routes(routes!(provider_available_models))
         .routes(routes!(provider_models, create_provider_model))
@@ -69,6 +69,7 @@ fn api_routes() -> OpenApiRouter<Arc<AppState>> {
             update_mapping_policy,
             delete_mapping_policy
         ))
+        .routes(routes!(delete_provider))
         .routes(routes!(audit_logs))
 }
 
@@ -342,6 +343,93 @@ async fn create_api_key(
 ) -> Result<Json<CreateApiKeyResponse>, ApiError> {
     let pool = database_pool(&state)?;
     Ok(Json(repositories::create_api_key(pool, request).await?))
+}
+
+#[derive(Serialize, ToSchema, serde::Deserialize)]
+struct UpdateApiKeyRequest {
+    key_name: String,
+    enabled: bool,
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/api-keys/{id}",
+    tag = "API Keys",
+    params(("id" = String, Path, description = "API key identifier.")),
+    request_body = UpdateApiKeyRequest,
+    responses((status = OK, description = "Update an API key."))
+)]
+async fn update_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateApiKeyRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::update_api_key(pool, &id, &request.key_name, request.enabled).await?;
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/api-keys/{id}",
+    tag = "API Keys",
+    params(("id" = String, Path, description = "API key identifier.")),
+    responses((status = OK, description = "Delete an API key."))
+)]
+async fn delete_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::delete_api_key(pool, &id).await?;
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    patch,
+    path = "/v1/api-keys/{id}/rotate",
+    tag = "API Keys",
+    params(("id" = String, Path, description = "API key identifier.")),
+    responses((status = OK, description = "Rotate an API key. Returns the new plaintext key once.", body = CreateApiKeyResponse))
+)]
+async fn rotate_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<CreateApiKeyResponse>, ApiError> {
+    let pool = database_pool(&state)?;
+    Ok(Json(repositories::rotate_api_key(pool, &id).await?))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/epichust-models/{id}",
+    tag = "Models",
+    params(("id" = String, Path, description = "Model identifier.")),
+    responses((status = OK, description = "Delete an Epichust model."))
+)]
+async fn delete_epichust_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::delete_epichust_model(pool, &id).await?;
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/providers/{id}",
+    tag = "Providers",
+    params(("id" = String, Path, description = "Provider identifier.")),
+    responses((status = OK, description = "Delete a provider and its models."))
+)]
+async fn delete_provider(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::delete_provider(pool, &id).await?;
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(

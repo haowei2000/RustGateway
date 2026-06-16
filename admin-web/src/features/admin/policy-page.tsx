@@ -1,18 +1,10 @@
 import { useState } from "react"
-import { GripVertical, Loader2, Plus, RotateCcw, Save, Shuffle, Trash2 } from "lucide-react"
+import { GripVertical, Loader2, Save, Shuffle, Trash2 } from "lucide-react"
 
+import { AddItemModal } from "@/components/ui/add-item-modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import {
-  LongItem,
-  LongItemActions,
-  LongItemBody,
-  LongItemIcon,
-  LongItemSubtitle,
-  LongItemTitle,
-} from "@/components/ui/item"
 import {
   useCreateMappingPolicy,
   useDeleteMappingPolicy,
@@ -28,14 +20,14 @@ import type {
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
 import {
-  EmptyBlock,
   EmptyResourcePage,
   ReadOnlyField,
-  ResourceActions,
   ResourceCard,
   ResourceNotice,
   ResourcePageFrame,
   ResourcePageHeader,
+  SubItemList,
+  SubItemRow,
 } from "./resource-page-parts"
 import { formatDate, getSelectedItem } from "./resource-page-utils"
 
@@ -87,13 +79,15 @@ function PolicyPageContent({
 }: { data: AdminData; isFetching: boolean; item?: MappingPolicy; onRefresh: () => void }) {
   const [draft, setDraft] = useState<PolicyDraft>(() => createPolicyDraft(item))
   const [notice, setNotice] = useState("")
-  const [selectedProviderModelId, setSelectedProviderModelId] = useState("")
+  const [showRateLimitModal, setShowRateLimitModal] = useState(false)
+  const [showAddRoute, setShowAddRoute] = useState(false)
+  const [newRouteModelId, setNewRouteModelId] = useState("")
+  const [newRouteWeight, setNewRouteWeight] = useState(1)
+  const [newRoutePriority, setNewRoutePriority] = useState(1)
   const isNew = !item
   const createMutation = useCreateMappingPolicy()
   const updateMutation = useUpdateMappingPolicy()
   const deleteMutation = useDeleteMappingPolicy()
-
-  const effectiveProviderModelId = selectedProviderModelId || data.providerModels[0]?.id || ""
 
   async function handleSave() {
     try {
@@ -137,29 +131,40 @@ function PolicyPageContent({
     catch (error) { setNotice(error instanceof Error ? error.message : "Failed to delete.") }
   }
 
-  function addRateLimitRule() {
-    const next = USAGE_LIMIT_TYPE_OPTIONS.find((t) => !draft.rate_limit_rules.some((r) => r.limit_type === t))
-    if (!next) { setNotice("All limit types already configured."); return }
-    setDraft((c) => ({ ...c, rate_limit_rules: [...c.rate_limit_rules, { limit_type: next, limit_value: 100 }] }))
-    setNotice("")
+  const availableLimitTypes = USAGE_LIMIT_TYPE_OPTIONS.filter(
+    (t) => !draft.rate_limit_rules.some((r) => r.limit_type === t),
+  )
+
+  const availableRouteModels = data.providerModels.filter(
+    (pm) => !draft.routes.some((r) => r.provider_model_id === pm.id),
+  )
+
+  function handleAddRateLimitRules(selectedIds: string[]) {
+    const newRules = selectedIds.map((limitType) => ({
+      limit_type: limitType as UsageLimitType,
+      limit_value: 100,
+    }))
+    setDraft((c) => ({ ...c, rate_limit_rules: [...c.rate_limit_rules, ...newRules] }))
+    setShowRateLimitModal(false)
   }
 
-  function addProviderRoute() {
-    const pm = data.providerModels.find((m) => m.id === effectiveProviderModelId)
-    if (!pm) return
-    if (draft.routes.some((r) => r.provider_model_id === pm.id)) {
-      setNotice("That provider model is already in the route list."); return
-    }
+  const effectiveNewRouteModelId = newRouteModelId || availableRouteModels[0]?.id || ""
+
+  function addRouteInline() {
+    const pm = data.providerModels.find((m) => m.id === effectiveNewRouteModelId)
+    if (!pm || draft.routes.some((r) => r.provider_model_id === pm.id)) return
     const provider = data.providers.find((p) => p.id === pm.provider_id)
     setDraft((c) => ({
       ...c,
       routes: [...c.routes, {
         provider_model_id: pm.id, provider_model_name: pm.model_name,
         provider_id: pm.provider_id, provider_name: provider?.provider_name ?? "Unknown",
-        weight: 1, priority: 1, enabled: true,
+        weight: newRouteWeight, priority: newRoutePriority, enabled: true,
       }],
     }))
-    setSelectedProviderModelId("")
+    setNewRouteModelId("")
+    setNewRouteWeight(1)
+    setNewRoutePriority(1)
   }
 
   const modelName = draft.epichust_model_id
@@ -169,6 +174,23 @@ function PolicyPageContent({
   return (
     <ResourcePageFrame variant="policy">
       <ResourcePageHeader
+        actions={
+          <>
+            {!isNew && (
+              <Button variant="ghost" disabled={deleteMutation.isPending} onClick={handleDelete}>
+                {deleteMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Trash2 className="icon-sm" />}
+                Delete
+              </Button>
+            )}
+            <Button disabled={!draft.epichust_model_id || createMutation.isPending || updateMutation.isPending}
+              onClick={handleSave}>
+              {(createMutation.isPending || updateMutation.isPending) ? (
+                <Loader2 className="icon-sm refresh-icon-busy" />
+              ) : (<Save className="icon-sm" />)}
+              {isNew ? "Create" : "Save"}
+            </Button>
+          </>
+        }
         description={item ? `Policy · ${item.id}` : "New mapping policy"}
         icon={Shuffle}
         isFetching={isFetching}
@@ -215,112 +237,133 @@ function PolicyPageContent({
         </div>
       </ResourceCard>
 
-      {/* ── Config Part: Rate Limit Rules ── */}
-      <ResourceCard title="Rate Limit Rules">
-        <div className="resource-config-list">
-          {draft.rate_limit_rules.map((rule, index) => (
-            <LongItem key={rule.limit_type}>
-              <LongItemIcon><GripVertical className="icon-sm" /></LongItemIcon>
-              <LongItemBody>
-                <LongItemTitle>{rule.limit_type}</LongItemTitle>
-                <LongItemSubtitle>{rule.limit_value} requests</LongItemSubtitle>
-              </LongItemBody>
+      {/* ── Rate Limit Rules ── */}
+      <SubItemList
+        title="Rate Limit Rules"
+        addLabel="Add rule"
+        onAdd={() => setShowRateLimitModal(true)}
+      >
+        {draft.rate_limit_rules.map((rule, index) => (
+          <SubItemRow
+            key={rule.limit_type}
+            icon={GripVertical}
+            title={rule.limit_type}
+            subtitle={`${rule.limit_value} requests`}
+            actions={
               <div className="flex items-center gap-2">
-                <Input className="w-24" type="number" min={1} value={rule.limit_value}
+                <Input className="w-24 h-8 text-xs" type="number" min={1} value={rule.limit_value}
                   onChange={(e) => setDraft((c) => {
                     const rules = [...c.rate_limit_rules]
                     rules[index] = { ...rules[index], limit_value: Math.max(1, Number(e.target.value) || 1) }
                     return { ...c, rate_limit_rules: rules }
                   })} />
-                <Button size="sm" variant="ghost" onClick={() =>
-                  setDraft((c) => ({ ...c, rate_limit_rules: c.rate_limit_rules.filter((_, i) => i !== index) }))}>
+                <span
+                  className="sub-item-action"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDraft((c) => ({ ...c, rate_limit_rules: c.rate_limit_rules.filter((_, i) => i !== index) })) } }}
+                  onClick={(e) => { e.stopPropagation(); setDraft((c) => ({ ...c, rate_limit_rules: c.rate_limit_rules.filter((_, i) => i !== index) })) }}
+                >
                   <Trash2 className="icon-sm" />
+                </span>
+              </div>
+            }
+          />
+        ))}
+      </SubItemList>
+
+      {/* ── Provider Routes ── */}
+      <SubItemList
+        title="Provider Routes"
+        addLabel="Add route"
+        onAdd={() => { setShowAddRoute(true); setNewRouteModelId(availableRouteModels[0]?.id ?? "") }}
+      >
+        {showAddRoute ? (
+          <div className="add-route-card">
+            {availableRouteModels.length === 0 ? (
+              <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--muted-foreground)" }}>
+                No provider models available. Add models in the Provider page first.
+              </p>
+            ) : (
+              <div className="add-route-card-row">
+                <select className="resource-select" style={{ flex: 1 }}
+                  value={effectiveNewRouteModelId}
+                  onChange={(e) => setNewRouteModelId(e.target.value)}>
+                  {availableRouteModels.map((pm) => {
+                    const provider = data.providers.find((p) => p.id === pm.provider_id)
+                    return <option key={pm.id} value={pm.id}>{provider?.provider_name ?? "?"} / {pm.model_name}</option>
+                  })}
+                </select>
+                <Label style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}>Weight</Label>
+                <Input className="w-16 h-8 text-xs" type="number" min={1}
+                  value={newRouteWeight}
+                  onChange={(e) => setNewRouteWeight(Math.max(1, Number(e.target.value) || 1))} />
+                <Label style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}>Priority</Label>
+                <Input className="w-16 h-8 text-xs" type="number" min={1}
+                  value={newRoutePriority}
+                  onChange={(e) => setNewRoutePriority(Math.max(1, Number(e.target.value) || 1))} />
+                <Button size="sm" disabled={!effectiveNewRouteModelId} onClick={() => { addRouteInline() }}>
+                  <Save className="icon-sm" /> Add
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowAddRoute(false)}>
+                  Cancel
                 </Button>
               </div>
-            </LongItem>
-          ))}
-          {draft.rate_limit_rules.length === 0 && <EmptyBlock>No rate limit rules configured.</EmptyBlock>}
-        </div>
-        <div className="resource-config-footer">
-          <Button variant="outline" size="sm"
-            disabled={draft.rate_limit_rules.length >= USAGE_LIMIT_TYPE_OPTIONS.length}
-            onClick={addRateLimitRule}>
-            <Plus className="icon-sm" /> Add Rule
-          </Button>
-        </div>
-      </ResourceCard>
-
-      {/* ── Config Part: Provider Routes ── */}
-      <ResourceCard title="Provider Routes">
-        <div className="resource-config-list">
-          {draft.routes.map((route, index) => (
-            <LongItem key={route.provider_model_id}>
-              <LongItemIcon><GripVertical className="icon-sm" /></LongItemIcon>
-              <LongItemBody>
-                <LongItemTitle>{route.provider_name} / {route.provider_model_name}</LongItemTitle>
-                <LongItemSubtitle>
-                  weight: {route.weight} · priority: {route.priority} · {route.enabled ? "enabled" : "disabled"}
-                </LongItemSubtitle>
-              </LongItemBody>
-              <Badge variant={route.enabled ? "default" : "secondary"}>{route.enabled ? "on" : "off"}</Badge>
-              <LongItemActions>
-                <Button size="sm" variant="outline"
-                  onClick={() => setDraft((c) => {
+            )}
+          </div>
+        ) : null}
+        {draft.routes.map((route, index) => (
+          <SubItemRow
+            key={route.provider_model_id}
+            icon={GripVertical}
+            title={`${route.provider_name} / ${route.provider_model_name}`}
+            subtitle={`weight: ${route.weight} · priority: ${route.priority}`}
+            actions={
+              <div className="flex items-center gap-1">
+                <span
+                  className="sub-item-action"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDraft((c) => {
                     const routes = [...c.routes]
                     routes[index] = { ...routes[index], enabled: !routes[index].enabled }
                     return { ...c, routes }
-                  })}>
+                  }) } } }
+                  onClick={(e) => { e.stopPropagation(); setDraft((c) => {
+                    const routes = [...c.routes]
+                    routes[index] = { ...routes[index], enabled: !routes[index].enabled }
+                    return { ...c, routes }
+                  }) }}
+                >
                   {route.enabled ? "Disable" : "Enable"}
-                </Button>
-                <Button size="sm" variant="ghost"
-                  onClick={() => setDraft((c) => ({
-                    ...c, routes: c.routes.filter((r) => r.provider_model_id !== route.provider_model_id),
-                  }))}>
+                </span>
+                <span
+                  className="sub-item-action"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDraft((c) => ({ ...c, routes: c.routes.filter((r) => r.provider_model_id !== route.provider_model_id) })) } }}
+                  onClick={(e) => { e.stopPropagation(); setDraft((c) => ({ ...c, routes: c.routes.filter((r) => r.provider_model_id !== route.provider_model_id) })) }}
+                >
                   <Trash2 className="icon-sm" />
-                </Button>
-              </LongItemActions>
-            </LongItem>
-          ))}
-          {draft.routes.length === 0 && <EmptyBlock>No provider routes configured.</EmptyBlock>}
-        </div>
-        <div className="resource-config-footer">
-          <select className="resource-select" value={effectiveProviderModelId}
-            onChange={(e) => setSelectedProviderModelId(e.target.value)}>
-            {data.providerModels.length > 0 ? (
-              data.providerModels.map((pm) => {
-                const provider = data.providers.find((p) => p.id === pm.provider_id)
-                return <option key={pm.id} value={pm.id}>{provider?.provider_name ?? "?"} / {pm.model_name}</option>
-              })
-            ) : (<option value="">No provider models</option>)}
-          </select>
-          <Button variant="outline" size="sm" disabled={!effectiveProviderModelId}
-            onClick={addProviderRoute}>
-            <Plus className="icon-sm" /> Add Route
-          </Button>
-        </div>
-      </ResourceCard>
-
-      {/* ── Actions ── */}
-      <ResourceActions>
-        <Button variant="outline" onClick={() => { setDraft(createPolicyDraft(item)); setNotice("Draft reset.") }}>
-          <RotateCcw className="icon-sm" /> Reset
-        </Button>
-        <Button disabled={!draft.epichust_model_id || createMutation.isPending || updateMutation.isPending}
-          onClick={handleSave}>
-          {(createMutation.isPending || updateMutation.isPending) ? (
-            <Loader2 className="icon-sm refresh-icon-busy" />
-          ) : (<Save className="icon-sm" />)}
-          {isNew ? "Create policy" : "Save changes"}
-        </Button>
-        {!isNew && (
-          <Button variant="ghost" disabled={deleteMutation.isPending} onClick={handleDelete}>
-            {deleteMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Trash2 className="icon-sm" />}
-            Delete
-          </Button>
-        )}
-      </ResourceActions>
+                </span>
+              </div>
+            }
+          />
+        ))}
+      </SubItemList>
 
       {notice && <ResourceNotice>{notice}</ResourceNotice>}
+
+      <AddItemModal
+        confirmLabel="Add rules"
+        emptyText="All limit types already configured."
+        items={availableLimitTypes.map((t) => ({ id: t, label: t }))}
+        open={showRateLimitModal}
+        title="Add Rate Limit Rule"
+        onClose={() => setShowRateLimitModal(false)}
+        onConfirm={handleAddRateLimitRules}
+      />
+
     </ResourcePageFrame>
   )
 }

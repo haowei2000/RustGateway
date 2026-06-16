@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -17,12 +21,75 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::config::GatewayConfig;
-use crate::db::Cache;
+use crate::db::{Cache, RateLimitConfig};
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 
+// ── Rate limiter ──────────────────────────────────────────────────
+
+type RateLimitStore = Arc<RwLock<HashMap<String, VecDeque<RateLimitEntry>>>>;
+
+#[derive(Clone)]
+struct RateLimitEntry {
+    timestamp: Instant,
+    tokens: u64,
+}
+
+fn check_rate_limit(
+    store: &RateLimitStore,
+    key_hash: &str,
+    config: &RateLimitConfig,
+) -> Option<String> {
+    let now = Instant::now();
+    let mut map = store.write().unwrap();
+    let entries = map.entry(key_hash.to_owned()).or_default();
+
+    // Prune entries older than 60s (covers both per-minute checks)
+    while entries.front().map_or(false, |e| now.duration_since(e.timestamp).as_secs() > 60) {
+        entries.pop_front();
+    }
+
+    // Check requests_per_minute
+    if let Some(limit) = config.requests_per_minute {
+        let count = entries.len() as i32;
+        if count >= limit {
+            return Some(format!(
+                "rate limit exceeded: {} requests per minute (limit: {limit})",
+                count
+            ));
+        }
+    }
+
+    // Check tokens_per_minute
+    if let Some(limit) = config.tokens_per_minute {
+        let total: u64 = entries.iter().map(|e| e.tokens).sum();
+        if total as i32 >= limit {
+            return Some(format!(
+                "rate limit exceeded: {total} tokens per minute (limit: {limit})"
+            ));
+        }
+    }
+
+    // per-day checks are best-effort (we only keep 60s window in memory);
+    // for a full implementation, use Redis counters.
+    None
+}
+
+fn record_rate_limit(store: &RateLimitStore, key_hash: &str, tokens: u64) {
+    let mut map = store.write().unwrap();
+    map.entry(key_hash.to_owned())
+        .or_default()
+        .push_back(RateLimitEntry {
+            timestamp: Instant::now(),
+            tokens,
+        });
+}
+
+// ── Gateway ───────────────────────────────────────────────────────
+
 pub struct LlmGateway {
     cache: Cache,
+    rate_limits: RateLimitStore,
     requests_total: IntCounter,
     auth_failures_total: IntCounter,
     upstream_errors_total: IntCounter,
@@ -37,6 +104,7 @@ pub struct RequestContext {
     counted_active: bool,
     auth_result: AuthResult,
     reject_reason: Option<String>,
+    key_hash: Option<String>,
     key_hash_prefix: Option<String>,
     model: Option<String>,
     stream: Option<bool>,
@@ -55,6 +123,7 @@ impl LlmGateway {
     ) -> std::result::Result<Self, prometheus::Error> {
         Ok(Self {
             cache,
+            rate_limits: Arc::new(RwLock::new(HashMap::new())),
             requests_total: register_int_counter!("gateway_requests_total", "Total requests")?,
             auth_failures_total: register_int_counter!(
                 "gateway_auth_failures_total",
@@ -85,6 +154,7 @@ impl ProxyHttp for LlmGateway {
             counted_active: false,
             auth_result: AuthResult::Missing,
             reject_reason: None,
+            key_hash: None,
             key_hash_prefix: None,
             model: None,
             stream: None,
@@ -143,6 +213,7 @@ impl ProxyHttp for LlmGateway {
         };
         let key_hash = hash_api_key(token);
         ctx.key_hash_prefix = Some(hash_prefix(&key_hash));
+        ctx.key_hash = Some(key_hash.clone());
         if !self
             .cache
             .read()
@@ -158,6 +229,29 @@ impl ProxyHttp for LlmGateway {
             )
             .await;
         }
+
+        // Check rate limits (clone config to drop read lock before await)
+        let rate_config = self
+            .cache
+            .read()
+            .ok()
+            .and_then(|c| c.rate_limits.get(&key_hash).cloned());
+        if let Some(config) = rate_config {
+            if !config.is_empty() {
+                if let Some(msg) = check_rate_limit(&self.rate_limits, &key_hash, &config) {
+                    ctx.reject_reason = Some(msg.clone());
+                    return respond_json(
+                        session,
+                        429,
+                        json!({"error":{"message":msg,"type":"rate_limit_exceeded"}}),
+                    )
+                    .await;
+                }
+            }
+        }
+
+        // Record request in rate limiter (tokens=0 for now; updated in response if possible)
+        record_rate_limit(&self.rate_limits, &key_hash, 0);
 
         // Resolve provider (will be refined in body filter if model matches a policy)
         if let Ok(cache) = self.cache.read() {
@@ -203,7 +297,7 @@ impl ProxyHttp for LlmGateway {
             return Ok(());
         }
 
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_buf) {
+        if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_buf) {
             let model = value
                 .get("model")
                 .and_then(|m| m.as_str())
@@ -215,24 +309,20 @@ impl ProxyHttp for LlmGateway {
             if !model.is_empty() {
                 if let Ok(cache) = self.cache.read() {
                     if let Some(route) = cache.model_routes.get(&model) {
-                        let mut raw = String::from_utf8_lossy(&ctx.body_buf).into_owned();
-                        let prefix = "\"model\":\"";
-                        if let Some(p) = raw.find(prefix) {
-                            let vs = p + prefix.len();
-                            if let Some(ve) = raw[vs..].find('"') {
-                                raw.replace_range(vs..vs + ve, &route.provider_model_name);
-                                let mut bytes = raw.into_bytes();
-                                while bytes.len() < ctx.body_buf.len() {
-                                    bytes.push(b' ');
-                                }
-                                *body = Some(Bytes::from(bytes));
-                                ctx.body_rewritten = true;
-                                log::info!(
-                                    "model translated: '{model}' → '{}'",
-                                    route.provider_model_name
-                                );
-                            }
+                        // Replace the model name in the parsed JSON value
+                        value["model"] = serde_json::Value::String(route.provider_model_name.clone());
+                        let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
+                        // Pad to original length so Content-Length stays valid
+                        while new_body.len() < ctx.body_buf.len() {
+                            new_body.push(b' ');
                         }
+                        *body = Some(Bytes::from(new_body));
+                        ctx.body_rewritten = true;
+                        log::info!(
+                            "model translated: '{model}' → '{}'",
+                            route.provider_model_name
+                        );
+
                         ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
                         ctx.provider_name = Some(route.provider.provider_name.clone());
                         ctx.provider_key = Some(route.provider.provider_key.clone());

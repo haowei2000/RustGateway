@@ -1,6 +1,6 @@
 import { Plus, type LucideIcon } from "lucide-react"
 
-import { Item, ItemDetail, ItemEyebrow, ItemMeta, ItemTitle } from "@/components/ui/item"
+import { Item, ItemContent, ItemDetail, ItemEyebrow, ItemIcon, ItemMeta, ItemTitle } from "@/components/ui/item"
 
 export type ItemListItem = {
   eyebrow?: string
@@ -62,12 +62,16 @@ function ItemList({
               selected={isSelected}
               onClick={() => onSelect(item.id)}
             >
-              {item.icon ? (
-                <item.icon className="icon-sm shrink-0 opacity-60" aria-hidden="true" />
-              ) : item.prefixClass ? (
-                <span className={`resource-dot ${item.prefixClass}`} />
-              ) : null}
-              <ItemTitle>{item.title}</ItemTitle>
+              <ItemIcon>
+                {item.icon ? (
+                  <item.icon className="icon-sm opacity-60" aria-hidden="true" />
+                ) : item.prefixClass ? (
+                  <span className={`resource-dot ${item.prefixClass}`} />
+                ) : null}
+              </ItemIcon>
+              <ItemContent>
+                <ItemTitle>{item.title}</ItemTitle>
+              </ItemContent>
               {item.eyebrow || item.meta ? (
                 <ItemDetail>
                   {item.eyebrow ? <ItemEyebrow>{item.eyebrow}</ItemEyebrow> : null}

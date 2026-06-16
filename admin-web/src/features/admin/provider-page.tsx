@@ -1,31 +1,24 @@
 import { useEffect, useState } from "react"
-import { Database, Download, Loader2, Plus, RotateCcw, Save, Trash2 } from "lucide-react"
+import { Database, Download, Loader2, Save, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { InputModal } from "@/components/ui/add-item-modal"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  LongItem,
-  LongItemActions,
-  LongItemBody,
-  LongItemIcon,
-  LongItemSubtitle,
-  LongItemTitle,
-} from "@/components/ui/item"
-import { useCreateProvider, useCreateProviderModel } from "@/hooks/use-admin-data"
+import { useCreateProvider, useCreateProviderModel, useDeleteProvider } from "@/hooks/use-admin-data"
 import { getProviderAvailableModels } from "@/lib/api"
 import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
 
 import {
-  EmptyBlock,
   EmptyResourcePage,
   ReadOnlyField,
-  ResourceActions,
   ResourceCard,
   ResourceNotice,
   ResourcePageFrame,
   ResourcePageHeader,
+  SubItemList,
+  SubItemRow,
 } from "./resource-page-parts"
 import { formatDate, getSelectedItem } from "./resource-page-utils"
 
@@ -56,12 +49,13 @@ function ProviderPageContent({
   data, isFetching, item, onRefresh,
 }: { data: AdminData; isFetching: boolean; item?: ProviderSummary; onRefresh: () => void }) {
   const [draft, setDraft] = useState<ProviderDraft>(() => createProviderDraft(item, data))
-  const [newProviderModelName, setNewProviderModelName] = useState("")
+  const [showModelModal, setShowModelModal] = useState(false)
   const [notice, setNotice] = useState("")
   const [fetching, setFetching] = useState(false)
   const [fetchedOnce, setFetchedOnce] = useState(false)
   const createProviderMutation = useCreateProvider()
   const createProviderModelMutation = useCreateProviderModel()
+  const deleteProviderMutation = useDeleteProvider()
   const isNew = !item
 
   useEffect(() => {
@@ -72,19 +66,31 @@ function ProviderPageContent({
   }, [item?.id])
 
   async function doFetchModels() {
-    if (!item) return
     setFetching(true)
     try {
-      const result = await getProviderAvailableModels(item.id)
+      let providerId = item?.id
+
+      // If new provider, save it first so we have an ID
+      if (!providerId) {
+        const result = await createProviderMutation.mutateAsync({
+          provider_name: draft.provider_name.trim() || "New Provider",
+          provider_base_url: draft.provider_base_url.trim(),
+          provider_key: draft.provider_key,
+        })
+        providerId = result.provider.id
+        setNotice(`Provider "${result.provider.provider_name}" created.`)
+      }
+
+      const result = await getProviderAvailableModels(providerId)
       let added = 0
       for (const m of result.models) {
         try {
-          const pm = await createProviderModelMutation.mutateAsync({ model_name: m.model_name, provider_id: item.id })
+          const pm = await createProviderModelMutation.mutateAsync({ model_name: m.model_name, provider_id: providerId })
           setDraft((c) => ({ ...c, providerModels: c.providerModels.some((x) => x.id === pm.id) ? c.providerModels.map((x) => x.id === pm.id ? pm : x) : [...c.providerModels, pm] }))
           added++
         } catch { /* duplicate */ }
       }
-      setNotice(`Fetched ${result.models.length} models, registered ${added} new.`)
+      setNotice(`Fetched ${result.models.length} upstream models, registered ${added} new.`)
       onRefresh()
     } catch (error) { setNotice(error instanceof Error ? error.message : "Fetch failed.") }
     finally { setFetching(false) }
@@ -103,14 +109,11 @@ function ProviderPageContent({
     } catch (error) { setNotice(error instanceof Error ? error.message : "Failed to create provider.") }
   }
 
-  async function addProviderModel() {
-    const modelName = newProviderModelName.trim()
-    if (!modelName) { setNotice("Enter a model name."); return }
+  async function addProviderModel(modelName: string) {
     if (item) {
       try {
         const pm = await createProviderModelMutation.mutateAsync({ model_name: modelName, provider_id: item.id })
         setDraft((c) => ({ ...c, providerModels: c.providerModels.some((x) => x.id === pm.id) ? c.providerModels.map((x) => x.id === pm.id ? pm : x) : [...c.providerModels, pm] }))
-        setNewProviderModelName("")
         setNotice(`Model "${pm.model_name}" added.`)
         onRefresh()
       } catch (error) { setNotice(error instanceof Error ? error.message : "Failed to add model.") }
@@ -118,7 +121,6 @@ function ProviderPageContent({
     }
     const pm: ProviderModel = { id: `draft_${Date.now()}`, provider_id: "draft", model_name: modelName, created_at: new Date().toISOString() }
     setDraft((c) => ({ ...c, providerModels: [...c.providerModels, pm] }))
-    setNewProviderModelName("")
     setNotice("Model added to draft.")
   }
 
@@ -127,6 +129,33 @@ function ProviderPageContent({
   return (
     <ResourcePageFrame variant="provider">
       <ResourcePageHeader
+        actions={
+          <>
+            {!isNew ? (
+              <Button variant="ghost" disabled={deleteProviderMutation.isPending} onClick={async () => {
+                if (!item) return
+                try {
+                  await deleteProviderMutation.mutateAsync(item.id)
+                  setNotice("Provider deleted.")
+                  onRefresh()
+                } catch (e) { setNotice(e instanceof Error ? e.message : "Delete failed.") }
+              }}>
+                {deleteProviderMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Trash2 className="icon-sm" />}
+                Delete
+              </Button>
+            ) : null}
+            {isNew ? (
+              <Button disabled={createProviderMutation.isPending} onClick={handleSave}>
+                {createProviderMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                {createProviderMutation.isPending ? "Saving…" : "Create"}
+              </Button>
+            ) : (
+              <Button onClick={() => setNotice("Draft staged locally.")}>
+                <Save className="icon-sm" /> Save
+              </Button>
+            )}
+          </>
+        }
         description={draft.provider_base_url || "New provider draft"}
         icon={Database}
         isFetching={isFetching}
@@ -164,59 +193,49 @@ function ProviderPageContent({
         </div>
       </ResourceCard>
 
-      {/* ── Config Part: Provider Models ── */}
-      <ResourceCard title="Provider Models">
-        <div className="resource-config-list">
-          {draft.providerModels.map((model) => (
-            <LongItem key={model.id}>
-              <LongItemIcon><Database className="icon-sm" /></LongItemIcon>
-              <LongItemBody>
-                <LongItemTitle>{model.model_name}</LongItemTitle>
-                <LongItemSubtitle>{formatDate(model.created_at)}</LongItemSubtitle>
-              </LongItemBody>
-              <LongItemActions>
-                <Button size="sm" variant="ghost"
-                  onClick={() => setDraft((c) => ({ ...c, providerModels: c.providerModels.filter((m) => m.id !== model.id) }))}>
-                  <Trash2 className="icon-sm" /> Remove
-                </Button>
-              </LongItemActions>
-            </LongItem>
-          ))}
-          {draft.providerModels.length === 0 && <EmptyBlock>No provider models. Fetch from upstream or add manually.</EmptyBlock>}
-        </div>
-        <div className="resource-config-footer">
-          <Input placeholder="model-name" value={newProviderModelName}
-            onChange={(e) => setNewProviderModelName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addProviderModel() }} />
-          <Button variant="outline" size="sm" disabled={createProviderModelMutation.isPending}
-            onClick={addProviderModel}>
-            <Plus className="icon-sm" /> Add
+      {/* ── Provider Models ── */}
+      <SubItemList
+        title="Provider Models"
+        addLabel="Add model"
+        onAdd={() => setShowModelModal(true)}
+        footer={
+          <Button variant="outline" size="sm" disabled={fetching} onClick={doFetchModels}>
+            <Download className={`icon-sm ${fetching ? "refresh-icon-busy" : ""}`} />
+            {fetching ? "Fetching…" : "Fetch upstream"}
           </Button>
-          {item && (
-            <Button variant="outline" size="sm" disabled={fetching} onClick={doFetchModels}>
-              <Download className={`icon-sm ${fetching ? "refresh-icon-busy" : ""}`} />
-              {fetching ? "Fetching…" : "Fetch upstream"}
-            </Button>
-          )}
-        </div>
-      </ResourceCard>
+        }
+      >
+        {draft.providerModels.map((model) => (
+          <SubItemRow
+            key={model.id}
+            icon={Database}
+            title={model.model_name}
+            subtitle={formatDate(model.created_at)}
+            actions={
+              <span
+                className="sub-item-action"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDraft((c) => ({ ...c, providerModels: c.providerModels.filter((m) => m.id !== model.id) })) } }}
+                onClick={(e) => { e.stopPropagation(); setDraft((c) => ({ ...c, providerModels: c.providerModels.filter((m) => m.id !== model.id) })) }}
+              >
+                <Trash2 className="icon-sm" /> Unattach
+              </span>
+            }
+          />
+        ))}
+      </SubItemList>
 
-      <ResourceActions>
-        <Button variant="outline" onClick={() => { setDraft(createProviderDraft(item, data)); setNotice("Draft reset.") }}>
-          <RotateCcw className="icon-sm" /> Reset
-        </Button>
-        {isNew ? (
-          <Button disabled={createProviderMutation.isPending} onClick={handleSave}>
-            {createProviderMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
-            {createProviderMutation.isPending ? "Saving…" : "Create provider"}
-          </Button>
-        ) : (
-          <Button onClick={() => setNotice("Draft staged locally.")}>
-            <Save className="icon-sm" /> Save draft
-          </Button>
-        )}
-      </ResourceActions>
       {notice && <ResourceNotice>{notice}</ResourceNotice>}
+
+      <InputModal
+        label="Model name"
+        open={showModelModal}
+        placeholder="e.g. gpt-4o"
+        title="Add Provider Model"
+        onClose={() => setShowModelModal(false)}
+        onConfirm={(name) => { addProviderModel(name); setShowModelModal(false) }}
+      />
     </ResourcePageFrame>
   )
 }

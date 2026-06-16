@@ -2,10 +2,10 @@
 
 /* ── Per-resource accent tokens ────────────────────────────────── */
 
-.resource-page-key   { --resource-accent: #CB2957; --resource-accent-fg: #000; --resource-accent-bg: rgba(203,41,87,0.10); }
-.resource-page-provider { --resource-accent: #CB2957; --resource-accent-fg: #000; --resource-accent-bg: rgba(203,41,87,0.14); }
-.resource-page-model { --resource-accent: #1a1a1a; --resource-accent-fg: #000; --resource-accent-bg: rgba(0,0,0,0.06); }
-.resource-page-policy { --resource-accent: #CB2957; --resource-accent-fg: #000; --resource-accent-bg: rgba(203,41,87,0.18); }
+.resource-page-key   { --resource-accent: #EE2B47; --resource-accent-fg: #34374C; --resource-accent-bg: rgba(238,43,71,0.10); }
+.resource-page-provider { --resource-accent: #EE2B47; --resource-accent-fg: #34374C; --resource-accent-bg: rgba(238,43,71,0.14); }
+.resource-page-model { --resource-accent: #34374C; --resource-accent-fg: #34374C; --resource-accent-bg: rgba(52,55,76,0.06); }
+.resource-page-policy { --resource-accent: #EE2B47; --resource-accent-fg: #34374C; --resource-accent-bg: rgba(238,43,71,0.18); }
 
 /* ── Content ────────────────────────────────────────────────────── */
 
@@ -16,8 +16,8 @@
 
 .content-error-card {
   margin-bottom: 1rem;
-  background: rgba(203,41,87,0.06);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  background: rgba(238,43,71,0.06);
+  box-shadow: 0 1px 3px rgba(52,55,76,0.08);
 }
 
 .content-error-card-content {
@@ -90,6 +90,12 @@
   line-height: 1.45;
 }
 
+.resource-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .resource-refresh-button {
   width: 100%;
 }
@@ -115,7 +121,7 @@
   min-width: 0;
   padding: 0.875rem;
   background: var(--muted);
-  border-left: 3px solid var(--resource-accent, #CB2957);
+  border-left: 3px solid var(--resource-accent, #EE2B47);
   border-radius: var(--radius-md);
 }
 
@@ -181,6 +187,21 @@
   gap: 0.5rem;
 }
 
+/* Inline add-route card inside SubItemList */
+.add-route-card {
+  padding: 0.625rem 0.75rem;
+  background: var(--card);
+  border: 1px dashed var(--secondary);
+  border-radius: var(--radius-md);
+}
+
+.add-route-card-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 /* Config footer: add button + select aligned right */
 .resource-config-footer {
   display: flex;
@@ -220,7 +241,7 @@
   min-width: 0;
   padding: 0 2rem 0 0.75rem;
   color: var(--foreground);
-  background: #DDDDDD;
+  background: var(--input);
   border-radius: var(--radius-md);
    @apply text-sm;
   outline: none;
@@ -276,9 +297,9 @@
   flex-direction: column;
   gap: 0.875rem;
   padding: 1rem;
-  background: rgba(203,41,87,0.06);
+  background: rgba(238,43,71,0.06);
   border-radius: var(--radius-md);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(52,55,76,0.06);
 }
 
 .resource-danger-copy {
@@ -312,10 +333,12 @@
 .resource-note {
   margin: 0;
   padding: 0.75rem;
-  color: var(--success-foreground);
-  background: rgba(0,0,0,0.06);
+  color: var(--foreground);
+  background: var(--muted);
   border-radius: var(--radius-md);
    @apply text-sm;
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 .resource-empty {

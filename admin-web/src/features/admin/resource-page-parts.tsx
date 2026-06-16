@@ -1,9 +1,10 @@
-import type { ReactNode } from "react"
-import { RefreshCw, type LucideIcon } from "lucide-react"
+import { Children, useState, type ReactNode } from "react"
+import { ChevronDown, Plus, RefreshCw, type LucideIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Item, ItemContent, ItemDetail, ItemIcon, ItemMeta, ItemTitle } from "@/components/ui/item"
 
 type ResourcePageFrameProps = {
   children: ReactNode
@@ -15,6 +16,7 @@ function ResourcePageFrame({ children, variant }: ResourcePageFrameProps) {
 }
 
 type ResourcePageHeaderProps = {
+  actions?: ReactNode
   description: string
   icon: LucideIcon
   isFetching: boolean
@@ -25,6 +27,7 @@ type ResourcePageHeaderProps = {
 }
 
 function ResourcePageHeader({
+  actions,
   description,
   icon: Icon,
   isFetching,
@@ -50,20 +53,23 @@ function ResourcePageHeader({
             </div>
           </div>
 
-          <Button
-            className="resource-refresh-button"
-            disabled={isFetching}
-            size="sm"
-            type="button"
-            variant="outline"
-            onClick={onRefresh}
-          >
-            <RefreshCw
-              className={`icon-sm ${isFetching ? "refresh-icon-busy" : ""}`}
-              aria-hidden="true"
-            />
-            Refresh
-          </Button>
+          <div className="resource-header-actions">
+            {actions}
+            <Button
+              className="resource-refresh-button"
+              disabled={isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={onRefresh}
+            >
+              <RefreshCw
+                className={`icon-sm ${isFetching ? "refresh-icon-busy" : ""}`}
+                aria-hidden="true"
+              />
+              Refresh
+            </Button>
+          </div>
         </div>
       </CardHeader>
     </Card>
@@ -91,16 +97,30 @@ function ResourceMetrics({ metrics }: { metrics: ResourceMetric[] }) {
 type ResourceCardProps = {
   children: ReactNode
   className?: string
+  collapsible?: boolean
+  defaultOpen?: boolean
   title: string
 }
 
-function ResourceCard({ children, className = "", title }: ResourceCardProps) {
+function ResourceCard({ children, className = "", collapsible = true, defaultOpen = true, title }: ResourceCardProps) {
+  const [open, setOpen] = useState(defaultOpen)
+
   return (
     <Card className={className}>
-      <CardHeader className="resource-card-header">
-        <CardTitle>{title}</CardTitle>
+      <CardHeader
+        className={`resource-card-header ${collapsible ? "cursor-pointer select-none" : ""}`}
+        onClick={collapsible ? () => setOpen((v) => !v) : undefined}
+      >
+        <div className="flex items-center justify-between">
+          <CardTitle>{title}</CardTitle>
+          {collapsible ? (
+            <ChevronDown
+              className={`icon-sm shrink-0 text-muted-foreground transition-transform duration-200 ${open ? "" : "-rotate-90"}`}
+            />
+          ) : null}
+        </div>
       </CardHeader>
-      <CardContent className="resource-card-content">{children}</CardContent>
+      {open ? <CardContent className="resource-card-content">{children}</CardContent> : null}
     </Card>
   )
 }
@@ -170,6 +190,76 @@ function DangerAction({ action, badge, description, title }: DangerActionProps) 
   )
 }
 
+// ── Sub-item list (child items under a parent resource) ────────────
+
+type SubItemListProps = {
+  addLabel?: string
+  children: ReactNode
+  footer?: ReactNode
+  onAdd?: () => void
+  title: string
+}
+
+function SubItemList({ addLabel, children, footer, onAdd, title }: SubItemListProps) {
+  const hasChildren = Children.count(children) > 0
+
+  return (
+    <section className="item-list sub-item-list">
+      <div className="item-list-header">
+        <div className="item-list-title-group">
+          <h2 className="item-list-title !text-foreground">{title}</h2>
+        </div>
+        {addLabel && onAdd ? (
+          <button className="item-list-add-button" type="button" onClick={onAdd}>
+            <Plus className="icon-sm" />
+            <span className="item-list-add-label">{addLabel}</span>
+          </button>
+        ) : null}
+      </div>
+      <div className="sub-item-body">
+        {hasChildren ? (
+          <div className="item-list-body">{children}</div>
+        ) : null}
+      </div>
+      {footer ? <div className="resource-config-footer">{footer}</div> : null}
+    </section>
+  )
+}
+
+type SubItemRowBadge = {
+  text: string
+  variant: "default" | "secondary" | "destructive" | "success" | "warning" | "outline"
+}
+
+type SubItemRowProps = {
+  actions?: ReactNode
+  badge?: SubItemRowBadge
+  icon: LucideIcon
+  onClick?: () => void
+  subtitle?: string
+  title: string
+}
+
+function SubItemRow({ actions, badge, icon: Icon, onClick, subtitle, title }: SubItemRowProps) {
+  return (
+    <Item onClick={onClick}>
+      <ItemIcon>
+        <Icon className="icon-sm opacity-60" />
+      </ItemIcon>
+      <ItemContent>
+        <ItemTitle>{title}</ItemTitle>
+      </ItemContent>
+      {subtitle ? (
+        <ItemDetail>
+          <ItemMeta>{subtitle}</ItemMeta>
+        </ItemDetail>
+      ) : null}
+      {badge ? <Badge variant={badge.variant}>{badge.text}</Badge> : null}
+      {actions}
+    </Item>
+  )
+}
+
 export {
   DangerAction,
   EmptyBlock,
@@ -182,4 +272,6 @@ export {
   ResourcePageFrame,
   ResourcePageHeader,
   ResourceSectionHeader,
+  SubItemList,
+  SubItemRow,
 }

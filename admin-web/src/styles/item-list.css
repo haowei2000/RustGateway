@@ -65,7 +65,7 @@
   padding: 0.3rem 0.45rem;
   opacity: 0;
   color: var(--sidebar-accent-foreground);
-  background: #1a1a1a;
+  background: #2C2E3E;
   border-radius: var(--radius-md);
   box-shadow: 0 8px 20px rgb(0 0 0 / 0.18);
    @apply text-xs;
@@ -93,10 +93,63 @@
 .item-list-empty {
   margin: 0;
   padding: 0.875rem;
-  color: #999999;
+  color: #9B9EB5;
   background: rgba(255,255,255,0.04);
   border-radius: var(--radius-lg);
    @apply text-sm;
+}
+
+/* Sub-item list in content area: remap sidebar tokens to light-theme equivalents */
+.sub-item-list {
+  --sidebar-muted: var(--muted-foreground);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--foreground);
+}
+
+.sub-item-list .item-list-add-button:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.sub-item-list .item-list-add-label {
+  color: var(--foreground);
+  background: var(--secondary);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.10);
+}
+
+.sub-item-body {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 0.25rem;
+}
+
+.sub-item-body .item-list-empty {
+  color: var(--muted-foreground);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* Item-level action button (delete / toggle) */
+.sub-item-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.sub-item-action:hover {
+  color: var(--foreground);
+  background: var(--secondary);
 }
 
 /* Per-resource sidebar item dots */
@@ -107,7 +160,7 @@
   border-radius: 50%;
   margin-right: 0.375rem;
 }
-.resource-dot-keys       { background: #CB2957; }
-.resource-dot-providers { background: #CB2957; opacity: 0.8; }
-.resource-dot-models     { background: #000000; }
-.resource-dot-policies   { background: #CB2957; opacity: 0.6; }
+.resource-dot-keys       { background: #EE2B47; }
+.resource-dot-providers { background: #EE2B47; opacity: 0.8; }
+.resource-dot-models     { background: #34374C; }
+.resource-dot-policies   { background: #EE2B47; opacity: 0.6; }

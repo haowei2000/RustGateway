@@ -1,17 +1,23 @@
-.PHONY: dev dev-debug dev-infra dev-api dev-web stop clean helm-up helm-down build check lint fmt
+.PHONY: dev dev-debug dev-all dev-infra dev-api dev-api-debug dev-web dev-gateway stop clean helm-up helm-down build check lint fmt
 
 # ── Local Development ──────────────────────────────────────────────
 
-# Start everything locally (Postgres + Redis via Docker, API + Web native)
+# Start everything locally (Postgres + Redis via Docker, API + Gateway + Web native)
 dev: dev-infra
 	@echo "==> Starting admin-api (RUST_LOG=info)..."
 	@RUST_LOG=info cargo run -p axum-admin-api &
+	@sleep 2
+	@echo "==> Starting gateway (RUST_LOG=info)..."
+	@DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway \
+	 REDIS_URL=redis://localhost:6379 \
+	 RUST_LOG=info cargo run -p pingora-gateway &
 	@sleep 2
 	@echo "==> Starting admin-web (Vite dev server on :5173)..."
 	@cd admin-web && npm run dev &
 	@echo ""
 	@echo "  Admin API:    http://localhost:9000"
 	@echo "  Swagger UI:   http://localhost:9000/docs"
+	@echo "  Gateway:      http://localhost:8080"
 	@echo "  Admin Web:    http://localhost:5173/admin/"
 	@echo ""
 	@echo "  Press Ctrl+C or run 'make stop' to shut down."
@@ -22,29 +28,36 @@ dev-debug: dev-infra
 	@echo "==> Starting admin-api (RUST_LOG=debug + backtrace)..."
 	@RUST_LOG=debug,tower_http=debug RUST_BACKTRACE=1 cargo run -p axum-admin-api &
 	@sleep 2
+	@echo "==> Starting gateway (RUST_LOG=debug)..."
+	@DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway \
+	 REDIS_URL=redis://localhost:6379 \
+	 RUST_LOG=debug RUST_BACKTRACE=1 cargo run -p pingora-gateway &
+	@sleep 2
 	@echo "==> Starting admin-web (Vite dev server on :5173)..."
 	@cd admin-web && npm run dev &
 	@echo ""
 	@echo "  Admin API:    http://localhost:9000  (RUST_LOG=debug, RUST_BACKTRACE=1)"
 	@echo "  Swagger UI:   http://localhost:9000/docs"
+	@echo "  Gateway:      http://localhost:8080"
 	@echo "  Admin Web:    http://localhost:5173/admin/"
 	@echo ""
 	@trap 'make stop' EXIT; wait
 
 # Start only Postgres + Redis in Docker (for running API/Web manually)
 dev-infra:
-	@echo "==> Starting Postgres on :5432..."
+	@echo "==> Starting Postgres on :5433..."
 	@docker rm -f llm-postgres-dev 2>/dev/null || true
 	@docker run -d --name llm-postgres-dev \
 		-e POSTGRES_USER=llm -e POSTGRES_PASSWORD=llm -e POSTGRES_DB=llm_gateway \
-		-p 5432:5432 postgres:16-alpine
+		-e POSTGRES_HOST_AUTH_METHOD=trust \
+		-p 5433:5432 postgres:16-alpine
 	@echo "==> Starting Redis on :6379..."
 	@docker rm -f llm-redis-dev 2>/dev/null || true
 	@docker run -d --name llm-redis-dev -p 6379:6379 redis:7-alpine
 	@echo "==> Waiting for Postgres to be ready..."
 	@until docker exec llm-postgres-dev pg_isready -U llm -d llm_gateway 2>/dev/null; do sleep 1; done
 	@echo "==> Postgres ready. Exporting DATABASE_URL..."
-	$(eval export DATABASE_URL=postgres://llm:llm@localhost:5432/llm_gateway)
+	$(eval export DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway)
 	$(eval export REDIS_URL=redis://localhost:6379)
 	$(eval export DATABASE_AUTO_MIGRATE=true)
 	$(eval export JWT_SECRET=dev-secret)
@@ -54,7 +67,7 @@ dev-infra:
 # Run only the admin API (assumes infra is already running)
 dev-api:
 	@echo "==> Starting admin-api..."
-	DATABASE_URL=postgres://llm:llm@localhost:5432/llm_gateway \
+	DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway \
 	DATABASE_AUTO_MIGRATE=true \
 	REDIS_URL=redis://localhost:6379 \
 	JWT_SECRET=dev-secret \
@@ -64,7 +77,7 @@ dev-api:
 # Run only the admin API in DEBUG mode
 dev-api-debug:
 	@echo "==> Starting admin-api (DEBUG)..."
-	DATABASE_URL=postgres://llm:llm@localhost:5432/llm_gateway \
+	DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway \
 	DATABASE_AUTO_MIGRATE=true \
 	REDIS_URL=redis://localhost:6379 \
 	JWT_SECRET=dev-secret \
@@ -76,6 +89,13 @@ dev-api-debug:
 dev-web:
 	@echo "==> Starting admin-web (Vite :5173)..."
 	cd admin-web && npm run dev
+
+# Run only the gateway (assumes infra is already running)
+dev-gateway:
+	@echo "==> Starting gateway (RUST_LOG=info)..."
+	DATABASE_URL=postgres://llm:llm@localhost:5433/llm_gateway \
+	REDIS_URL=redis://localhost:6379 \
+	RUST_LOG=info cargo run -p pingora-gateway
 
 # Stop all local dev services
 stop:

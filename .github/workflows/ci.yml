@@ -61,8 +61,8 @@ jobs:
           - context: .
             dockerfile: admin-api/Dockerfile
             name: admin-api
-          - context: admin-web
-            dockerfile: Dockerfile
+          - context: .
+            dockerfile: admin-web/Dockerfile
             name: admin-web
     steps:
       - uses: actions/checkout@v5

@@ -4,7 +4,7 @@ import { ItemList, type ItemListItem } from "@/components/layout/item-list"
 import { SidebarButtonGroup } from "@/components/layout/sidebar-button-group"
 import { useAdminData } from "@/hooks/use-admin-data"
 import type { AdminData } from "@/lib/api"
-import { NEW_SIDEBAR_ITEM_ID, type SidebarResource } from "@/stores/admin-store"
+import { type SidebarResource } from "@/stores/admin-store"
 import { useAdminStore } from "@/stores/admin-store"
 
 function Sidebar() {
@@ -16,21 +16,14 @@ function Sidebar() {
   const items = getSidebarItems(sidebarResource, adminData.data)
   const effectiveSelectedItemId = selectedSidebarItemId || items[0]?.id || ""
 
-  function handleAddItem() {
-    setSelectedSidebarItemId(NEW_SIDEBAR_ITEM_ID)
-  }
-
   return (
     <aside className="sidebar">
       <SidebarButtonGroup />
       <ItemList
-        addLabel={getAddItemLabel(sidebarResource)}
         emptyText="No items found."
-        isAdding={false}
         items={items}
         selectedItemId={effectiveSelectedItemId}
         title={getItemListTitle(sidebarResource)}
-        onAdd={handleAddItem}
         onSelect={setSelectedSidebarItemId}
       />
     </aside>
@@ -84,13 +77,6 @@ function getItemListTitle(resource: SidebarResource) {
   if (resource === "providers") return "Providers"
   if (resource === "policies") return "Policies"
   return "Models"
-}
-
-function getAddItemLabel(resource: SidebarResource) {
-  if (resource === "keys") return "New API key"
-  if (resource === "providers") return "New provider"
-  if (resource === "policies") return "New policy"
-  return "New model"
 }
 
 export { Sidebar }

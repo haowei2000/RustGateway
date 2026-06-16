@@ -47,7 +47,7 @@ fn check_rate_limit(
     // Prune entries older than 60s (covers both per-minute checks)
     while entries
         .front()
-        .map_or(false, |e| now.duration_since(e.timestamp).as_secs() > 60)
+        .is_some_and(|e| now.duration_since(e.timestamp).as_secs() > 60)
     {
         entries.pop_front();
     }

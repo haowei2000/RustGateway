@@ -12,13 +12,13 @@ export type ItemListItem = {
 }
 
 type ItemListProps = {
-  addLabel?: string
+  addLabel: string
   emptyText: string
-  isAdding?: boolean
+  isAdding: boolean
   items: ItemListItem[]
   selectedItemId: string
   title: string
-  onAdd?: () => void
+  onAdd: () => void
   onSelect: (id: string) => void
 }
 
@@ -38,18 +38,16 @@ function ItemList({
         <div className="item-list-title-group">
           <h2 className="item-list-title">{title}</h2>
         </div>
-        {onAdd ? (
-          <button
-            aria-label={addLabel}
-            className="item-list-add-button"
-            disabled={isAdding}
-            type="button"
-            onClick={onAdd}
-          >
-            <Plus className="icon-sm" aria-hidden="true" />
-            <span className="item-list-add-label">{addLabel}</span>
-          </button>
-        ) : null}
+        <button
+          aria-label={addLabel}
+          className="item-list-add-button"
+          disabled={isAdding}
+          type="button"
+          onClick={onAdd}
+        >
+          <Plus className="icon-sm" aria-hidden="true" />
+          <span className="item-list-add-label">{addLabel}</span>
+        </button>
       </div>
 
       <div className="item-list-body">

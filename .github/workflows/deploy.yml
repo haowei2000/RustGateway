@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Image tag (default = latest)
+        description: 'Image tag (default = latest)'
         type: string
         default: latest
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository }}
+  IMAGE_PREFIX: ${{ github.repository_owner }}/rustgateway
 
 jobs:
   deploy:
@@ -31,7 +31,8 @@ jobs:
             echo "==> Pulling latest deploy config..."
             git pull
 
-            echo "==> Pulling images..."
+            echo "==> Pulling images (tag: ${{ inputs.image_tag }})..."
+            export IMAGE_TAG=${{ inputs.image_tag }}
             docker compose -f deploy/docker-compose-vps.yml pull
 
             echo "==> Restarting services..."

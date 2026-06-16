@@ -49,7 +49,7 @@ services:
     restart: unless-stopped
 
   gateway:
-    image: ghcr.io/haowei2000/rustgateway/gateway:latest
+    image: ghcr.io/haowei2000/rustgateway/gateway:${IMAGE_TAG:-latest}
     environment:
       DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
       REDIS_URL: redis://redis:6379
@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
 
   admin-api:
-    image: ghcr.io/haowei2000/rustgateway/admin-api:latest
+    image: ghcr.io/haowei2000/rustgateway/admin-api:${IMAGE_TAG:-latest}
     environment:
       DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
       REDIS_URL: redis://redis:6379
@@ -87,7 +87,7 @@ services:
     restart: unless-stopped
 
   admin-web:
-    image: ghcr.io/haowei2000/rustgateway/admin-web:latest
+    image: ghcr.io/haowei2000/rustgateway/admin-web:${IMAGE_TAG:-latest}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:80/admin/ | head -1 | grep -q html || exit 1"]
       interval: 30s

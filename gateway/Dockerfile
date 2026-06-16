@@ -1,25 +1,35 @@
+# ── Builder ────────────────────────────────────────────────────────
 FROM rust:1.95-slim AS builder
 
 WORKDIR /workspace
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake golang libssl-dev pkg-config \
-    && rm -rf /var/lib/apt/lists/*
 
+# System deps (cached layer)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake golang libssl-dev pkg-config
+
+# Dependencies first (cached unless Cargo.toml/Cargo.lock change)
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-COPY admin-api ./admin-api
 COPY gateway ./gateway
 COPY deploy/sql ./deploy/sql
 
-RUN cargo build --release -p pingora-gateway
+# Build with sccache for faster rebuilds
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release -p pingora-gateway && \
+    cp /workspace/target/release/pingora-gateway /usr/local/bin/pingora-gateway
 
+# ── Runtime ────────────────────────────────────────────────────────
 FROM debian:trixie-slim
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3
 
-COPY --from=builder /workspace/target/release/pingora-gateway /usr/local/bin/pingora-gateway
+COPY --from=builder /usr/local/bin/pingora-gateway /usr/local/bin/pingora-gateway
 
 EXPOSE 8080 9090
 ENTRYPOINT ["/usr/local/bin/pingora-gateway"]

@@ -45,7 +45,10 @@ fn check_rate_limit(
     let entries = map.entry(key_hash.to_owned()).or_default();
 
     // Prune entries older than 60s (covers both per-minute checks)
-    while entries.front().map_or(false, |e| now.duration_since(e.timestamp).as_secs() > 60) {
+    while entries
+        .front()
+        .map_or(false, |e| now.duration_since(e.timestamp).as_secs() > 60)
+    {
         entries.pop_front();
     }
 
@@ -310,7 +313,8 @@ impl ProxyHttp for LlmGateway {
                 if let Ok(cache) = self.cache.read() {
                     if let Some(route) = cache.model_routes.get(&model) {
                         // Replace the model name in the parsed JSON value
-                        value["model"] = serde_json::Value::String(route.provider_model_name.clone());
+                        value["model"] =
+                            serde_json::Value::String(route.provider_model_name.clone());
                         let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
                         // Pad to original length so Content-Length stays valid
                         while new_body.len() < ctx.body_buf.len() {

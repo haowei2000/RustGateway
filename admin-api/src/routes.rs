@@ -56,10 +56,20 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 fn api_routes() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::new()
-        .routes(routes!(api_keys, create_api_key, update_api_key, delete_api_key, rotate_api_key))
+        .routes(routes!(
+            api_keys,
+            create_api_key,
+            update_api_key,
+            delete_api_key,
+            rotate_api_key
+        ))
         .routes(routes!(attach_api_key_mapping_policy))
         .routes(routes!(detach_api_key_mapping_policy))
-        .routes(routes!(epichust_models, create_epichust_model, delete_epichust_model))
+        .routes(routes!(
+            epichust_models,
+            create_epichust_model,
+            delete_epichust_model
+        ))
         .routes(routes!(providers, create_provider))
         .routes(routes!(provider_available_models))
         .routes(routes!(provider_models, create_provider_model))

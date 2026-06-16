@@ -704,33 +704,26 @@ pub async fn update_api_key(
     key_name: &str,
     enabled: bool,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE epichust_api_keys SET key_name = $1, enabled = $2 WHERE id = $3",
-    )
-    .bind(key_name.trim())
-    .bind(enabled)
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE epichust_api_keys SET key_name = $1, enabled = $2 WHERE id = $3")
+        .bind(key_name.trim())
+        .bind(enabled)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
-pub async fn rotate_api_key(
-    pool: &PgPool,
-    id: &str,
-) -> Result<CreateApiKeyResponse, sqlx::Error> {
+pub async fn rotate_api_key(pool: &PgPool, id: &str) -> Result<CreateApiKeyResponse, sqlx::Error> {
     let plaintext_api_key = format!("llmgw_{}", Uuid::new_v4().simple());
     let key_hash = hash_api_key(&plaintext_api_key);
     let key_hash_prefix = hash_prefix(&key_hash);
 
-    sqlx::query(
-        "UPDATE epichust_api_keys SET key_hash = $1, key_hash_prefix = $2 WHERE id = $3",
-    )
-    .bind(&key_hash)
-    .bind(&key_hash_prefix)
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE epichust_api_keys SET key_hash = $1, key_hash_prefix = $2 WHERE id = $3")
+        .bind(&key_hash)
+        .bind(&key_hash_prefix)
+        .bind(id)
+        .execute(pool)
+        .await?;
 
     Ok(CreateApiKeyResponse {
         plaintext_api_key,

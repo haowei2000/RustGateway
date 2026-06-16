@@ -1,4 +1,4 @@
-# VPS deployment — epichust.com DNS → Caddy auto HTTPS
+# VPS deployment — nginx on host handles TLS + domain routing
 # Domains: llm.epichust.com / llmadmin.epichust.com / llmapi.epichust.com
 # Usage: docker compose -f deploy/docker-compose-vps.yml up -d
 
@@ -9,17 +9,6 @@ x-logging: &logging
     max-file: "5"
 
 services:
-  caddy:
-    image: caddy:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    logging: *logging
-    restart: unless-stopped
-
   postgres:
     image: postgres:16-alpine
     environment:
@@ -50,6 +39,8 @@ services:
 
   gateway:
     image: ghcr.io/haowei2000/rustgateway/gateway:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:8080:8080"
     environment:
       DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
       REDIS_URL: redis://redis:6379
@@ -68,6 +59,8 @@ services:
 
   admin-api:
     image: ghcr.io/haowei2000/rustgateway/admin-api:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:9000:9000"
     environment:
       DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
       REDIS_URL: redis://redis:6379
@@ -88,6 +81,8 @@ services:
 
   admin-web:
     image: ghcr.io/haowei2000/rustgateway/admin-web:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:3080:80"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:80/admin/ | head -1 | grep -q html || exit 1"]
       interval: 30s
@@ -124,4 +119,3 @@ services:
 
 volumes:
   pgdata:
-  caddy_data:

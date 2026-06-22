@@ -1,0 +1,19 @@
+{
+  "projectId": "663b735b-9a02-4733-8094-7efea45c203c",
+  "shape": "package",
+  "pkg": "llm-gateway-admin-web",
+  "globalName": "AdminUI",
+  "srcDir": "src/components",
+  "tsconfig": "tsconfig.app.json",
+  "cssEntry": ".design-sync/build/compiled.css",
+  "extraFonts": [".design-sync/fonts/inter.css"],
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraEntries": ["./.design-sync/preview-provider.tsx"],
+  "provider": { "component": "PreviewProvider" },
+  "overrides": {
+    "AddItemModal": { "cardMode": "single", "viewport": "480x540" },
+    "InputModal": { "cardMode": "single", "viewport": "480x380" },
+    "LongItemActions": { "cardMode": "column" }
+  },
+  "buildCmd": "node .ds-sync/node_modules/@tailwindcss/cli/dist/index.mjs -i .design-sync/build/ds-styles.css -o .design-sync/build/compiled.css"
+}

@@ -10,6 +10,7 @@ import {
   useCreateProviderModel,
   useDeleteProvider,
   useDeleteProviderModel,
+  useUpdateProvider,
 } from "@/hooks/use-admin-data"
 import { getProviderAvailableModels } from "@/lib/api"
 import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
@@ -62,7 +63,26 @@ function ProviderPageContent({
   const createProviderModelMutation = useCreateProviderModel()
   const deleteProviderMutation = useDeleteProvider()
   const deleteProviderModelMutation = useDeleteProviderModel()
+  const updateProviderMutation = useUpdateProvider()
   const isNew = !item
+
+  async function handleUpdate() {
+    if (!item) return
+    try {
+      await updateProviderMutation.mutateAsync({
+        id: item.id,
+        input: {
+          provider_name: draft.provider_name.trim() || item.provider_name,
+          provider_base_url: draft.provider_base_url.trim(),
+          provider_key: draft.provider_key.trim() || undefined,
+        },
+      })
+      setNotice("Provider saved.")
+      onRefresh()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to save provider.")
+    }
+  }
 
   async function removeProviderModel(model: ProviderModel) {
     // Persisted model → delete via API (cascades its policy routes);
@@ -179,8 +199,9 @@ function ProviderPageContent({
                 {createProviderMutation.isPending ? "Saving…" : "Create"}
               </Button>
             ) : (
-              <Button onClick={() => setNotice("Draft staged locally.")}>
-                <Save className="icon-sm" /> Save
+              <Button disabled={updateProviderMutation.isPending} onClick={handleUpdate}>
+                {updateProviderMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                Save
               </Button>
             )}
           </>

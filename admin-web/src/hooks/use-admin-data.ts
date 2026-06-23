@@ -7,6 +7,8 @@ import {
   createMappingPolicy,
   createProvider,
   createProviderModel,
+  updateProvider,
+  updateEpichustModel,
   deleteApiKey,
   deleteEpichustModel,
   deleteMappingPolicy,
@@ -24,6 +26,7 @@ import {
   type CreateProviderModelRequest,
   type CreateProviderRequest,
   type UpdateMappingPolicyRequest,
+  type UpdateProviderRequest,
 } from "@/lib/api"
 
 const adminDataQueryKey = ["admin-data"] as const
@@ -51,6 +54,30 @@ export function useCreateProvider() {
 
   return useMutation({
     mutationFn: (input: CreateProviderRequest) => createProvider(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useUpdateProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateProviderRequest }) =>
+      updateProvider(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useUpdateEpichustModel() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: CreateEpichustModelRequest }) =>
+      updateEpichustModel(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
     },

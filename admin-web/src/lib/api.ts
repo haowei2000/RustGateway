@@ -247,8 +247,23 @@ export function createEpichustModel(input: CreateEpichustModelRequest) {
   return postJson<EpichustModel>("epichust-models", input)
 }
 
+export function updateEpichustModel(id: string, input: CreateEpichustModelRequest) {
+  return requestJson<void>("PUT", `epichust-models/${id}`, input)
+}
+
+export type UpdateProviderRequest = {
+  provider_name: string
+  provider_base_url: string
+  // Omit/empty to keep the existing upstream key.
+  provider_key?: string
+}
+
 export function createProvider(input: CreateProviderRequest) {
   return postJson<CreateProviderResponse>("providers", input)
+}
+
+export function updateProvider(id: string, input: UpdateProviderRequest) {
+  return requestJson<void>("PUT", `providers/${id}`, input)
 }
 
 export function getProviderAvailableModels(providerId: string) {

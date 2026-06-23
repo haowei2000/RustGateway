@@ -68,7 +68,8 @@ fn api_routes() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(
             epichust_models,
             create_epichust_model,
-            delete_epichust_model
+            delete_epichust_model,
+            update_epichust_model
         ))
         .routes(routes!(providers, create_provider))
         .routes(routes!(provider_available_models))
@@ -83,7 +84,7 @@ fn api_routes() -> OpenApiRouter<Arc<AppState>> {
             update_mapping_policy,
             delete_mapping_policy
         ))
-        .routes(routes!(delete_provider))
+        .routes(routes!(delete_provider, update_provider))
         .routes(routes!(audit_logs))
 }
 
@@ -164,6 +165,24 @@ async fn create_epichust_model(
 }
 
 #[utoipa::path(
+    put,
+    path = "/v1/epichust-models/{id}",
+    tag = "Models",
+    params(("id" = String, Path, description = "Gateway model identifier.")),
+    request_body = CreateEpichustModelRequest,
+    responses((status = NO_CONTENT, description = "Update a gateway model definition."))
+)]
+async fn update_epichust_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<CreateEpichustModelRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::update_epichust_model(pool, &id, request).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     get,
     path = "/v1/providers",
     tag = "Providers",
@@ -189,6 +208,41 @@ async fn create_provider(
 ) -> Result<Json<CreateProviderResponse>, ApiError> {
     let pool = database_pool(&state)?;
     Ok(Json(repositories::create_provider(pool, request).await?))
+}
+
+#[derive(Serialize, ToSchema, serde::Deserialize)]
+struct UpdateProviderRequest {
+    provider_name: String,
+    provider_base_url: String,
+    /// New upstream key. Omit or leave empty to keep the existing key.
+    #[serde(default)]
+    #[schema(write_only)]
+    provider_key: Option<String>,
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/providers/{id}",
+    tag = "Providers",
+    params(("id" = String, Path, description = "Provider identifier.")),
+    request_body = UpdateProviderRequest,
+    responses((status = NO_CONTENT, description = "Update an upstream provider."))
+)]
+async fn update_provider(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateProviderRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::update_provider(
+        pool,
+        &id,
+        &request.provider_name,
+        &request.provider_base_url,
+        request.provider_key,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

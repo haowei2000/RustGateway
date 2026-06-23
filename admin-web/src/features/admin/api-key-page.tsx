@@ -11,6 +11,7 @@ import {
   useDeleteApiKey,
   useDetachApiKeyMappingPolicy,
   useRotateApiKey,
+  useUpdateApiKey,
 } from "@/hooks/use-admin-data"
 import type { AdminData, ApiKeyMappingPolicy, ApiKeySummary, MappingPolicy } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
@@ -67,6 +68,21 @@ function ApiKeyPageContent({
   const detachPolicyMutation = useDetachApiKeyMappingPolicy()
   const deleteApiKeyMutation = useDeleteApiKey()
   const rotateApiKeyMutation = useRotateApiKey()
+  const updateApiKeyMutation = useUpdateApiKey()
+
+  async function handleUpdate() {
+    if (!item) return
+    try {
+      await updateApiKeyMutation.mutateAsync({
+        id: item.id,
+        input: { key_name: draft.key_name.trim() || item.key_name, enabled: draft.enabled },
+      })
+      setNotice("API key saved.")
+      onRefresh()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to save API key.")
+    }
+  }
 
   async function handleRotateKey() {
     if (!item) return
@@ -164,8 +180,9 @@ function ApiKeyPageContent({
                 {createApiKeyMutation.isPending ? "Saving…" : "Create"}
               </Button>
             ) : (
-              <Button onClick={() => setNotice("Draft staged locally.")}>
-                <Save className="icon-sm" /> Save
+              <Button disabled={updateApiKeyMutation.isPending} onClick={handleUpdate}>
+                {updateApiKeyMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                Save
               </Button>
             )}
           </>

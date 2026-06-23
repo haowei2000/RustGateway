@@ -63,6 +63,20 @@ pub async fn create_epichust_model(
     })
 }
 
+pub async fn update_epichust_model(
+    pool: &PgPool,
+    id: &str,
+    request: CreateEpichustModelRequest,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE epichust_models SET model_name = $1, model_type = $2 WHERE id = $3")
+        .bind(request.model_name.trim())
+        .bind(model_type_to_str(&request.model_type))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn delete_epichust_model(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM epichust_models WHERE id = $1")
         .bind(id)
@@ -150,6 +164,41 @@ pub async fn create_provider(
             created_at: row.try_get("created_at")?,
         },
     })
+}
+
+pub async fn update_provider(
+    pool: &PgPool,
+    id: &str,
+    provider_name: &str,
+    provider_base_url: &str,
+    provider_key: Option<String>,
+) -> Result<(), sqlx::Error> {
+    // Only rotate the stored key when a non-empty new key is supplied.
+    match provider_key.filter(|key| !key.trim().is_empty()) {
+        Some(key) => {
+            sqlx::query(
+                "UPDATE providers SET provider_name = $1, provider_base_url = $2, \
+                 provider_key_ciphertext = $3 WHERE id = $4",
+            )
+            .bind(provider_name.trim())
+            .bind(provider_base_url.trim())
+            .bind(key.into_bytes())
+            .bind(id)
+            .execute(pool)
+            .await?;
+        }
+        None => {
+            sqlx::query(
+                "UPDATE providers SET provider_name = $1, provider_base_url = $2 WHERE id = $3",
+            )
+            .bind(provider_name.trim())
+            .bind(provider_base_url.trim())
+            .bind(id)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn delete_provider(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {

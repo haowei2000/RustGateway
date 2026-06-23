@@ -4,7 +4,11 @@ import { Layers3, Loader2, Save, Shuffle, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useCreateEpichustModel, useDeleteEpichustModel } from "@/hooks/use-admin-data"
+import {
+  useCreateEpichustModel,
+  useDeleteEpichustModel,
+  useUpdateEpichustModel,
+} from "@/hooks/use-admin-data"
 import type { AdminData, EpichustModel, ModelType } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
 
@@ -45,7 +49,25 @@ function ModelPageContent({
   const [notice, setNotice] = useState("")
   const createMutation = useCreateEpichustModel()
   const deleteMutation = useDeleteEpichustModel()
+  const updateMutation = useUpdateEpichustModel()
   const isNew = !item
+
+  async function handleUpdate() {
+    if (!item) return
+    try {
+      await updateMutation.mutateAsync({
+        id: item.id,
+        input: {
+          model_name: draft.model_name.trim() || item.model_name,
+          model_type: draft.model_type,
+        },
+      })
+      setNotice("Model saved.")
+      onRefresh()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to save model.")
+    }
+  }
   const { setSidebarResource, setSelectedSidebarItemId } = useAdminStore()
 
   const modelPolicies = item ? data.policies.filter((p) => p.epichust_model_id === item.id) : []
@@ -91,8 +113,9 @@ function ModelPageContent({
                 {createMutation.isPending ? "Saving…" : "Create"}
               </Button>
             ) : (
-              <Button onClick={() => setNotice("Draft staged locally.")}>
-                <Save className="icon-sm" /> Save
+              <Button disabled={updateMutation.isPending} onClick={handleUpdate}>
+                {updateMutation.isPending ? <Loader2 className="icon-sm refresh-icon-busy" /> : <Save className="icon-sm" />}
+                Save
               </Button>
             )}
           </>

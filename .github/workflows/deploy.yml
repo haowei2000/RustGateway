@@ -28,9 +28,10 @@ jobs:
             set -e
             cd /opt/llm-gateway
 
-            echo "==> Pulling latest deploy config..."
+            echo "==> Updating deploy config (compose file only; preserves server-local files)..."
             git config --global --add safe.directory /opt/llm-gateway
-            git pull
+            git fetch origin main
+            git checkout -f origin/main -- deploy/docker-compose-vps.yml || echo "WARN: keeping existing compose config"
 
             echo "==> Pulling images (tag: ${{ inputs.image_tag }})..."
             export IMAGE_TAG=${{ inputs.image_tag }}

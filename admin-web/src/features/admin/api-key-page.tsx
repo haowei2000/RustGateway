@@ -280,7 +280,7 @@ function ApiKeyPageContent({
       {showDocsModal ? (() => {
         const key = docsKey || "<your-api-key>"
         const model = draft.mappingPolicies[0]?.epichust_model_name || "your-model-name"
-        const curlCmd = `curl -X POST http://localhost:8080/v1/chat/completions \\
+        const curlCmd = `curl -X POST https://llm.epichust.com/v1/chat/completions \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
   -d '{

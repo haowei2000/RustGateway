@@ -40,7 +40,8 @@ services:
   gateway:
     image: 47.99.42.4:5000/rustgateway/gateway:${IMAGE_TAG:-latest}
     ports:
-      - "127.0.0.1:8080:8080"
+      # host 8080 is taken by the Dify stack on this VPS; expose gateway on 18080
+      - "127.0.0.1:18080:8080"
     environment:
       DATABASE_URL: postgres://llm:llm@postgres:5432/llm_gateway
       REDIS_URL: redis://redis:6379

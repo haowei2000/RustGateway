@@ -13,6 +13,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY gateway ./gateway
+# admin-api is a workspace member referenced by the root manifest, so cargo
+# needs its manifest present even when building only -p pingora-gateway.
+COPY admin-api ./admin-api
 COPY deploy/sql ./deploy/sql
 
 # Build with sccache for faster rebuilds

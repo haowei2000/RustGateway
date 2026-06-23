@@ -160,6 +160,16 @@ pub async fn delete_provider(pool: &PgPool, id: &str) -> Result<(), sqlx::Error>
     Ok(())
 }
 
+pub async fn delete_provider_model(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
+    // mapping_policy_routes referencing this provider model are removed by
+    // the ON DELETE CASCADE on mapping_policy_routes.provider_model_id.
+    sqlx::query("DELETE FROM provider_models WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderCredentials {
     pub id: String,
@@ -718,23 +728,36 @@ pub async fn rotate_api_key(pool: &PgPool, id: &str) -> Result<CreateApiKeyRespo
     let key_hash = hash_api_key(&plaintext_api_key);
     let key_hash_prefix = hash_prefix(&key_hash);
 
-    sqlx::query("UPDATE epichust_api_keys SET key_hash = $1, key_hash_prefix = $2 WHERE id = $3")
-        .bind(&key_hash)
-        .bind(&key_hash_prefix)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let row = sqlx::query(
+        r#"
+        UPDATE epichust_api_keys
+        SET key_hash = $1, key_hash_prefix = $2
+        WHERE id = $3
+        RETURNING id, key_name, key_hash_prefix, enabled, last_used_at, created_at
+        "#,
+    )
+    .bind(&key_hash)
+    .bind(&key_hash_prefix)
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    let key_id: String = row.try_get("id")?;
+    let mapping_policies = load_api_key_mapping_policies(pool)
+        .await?
+        .remove(&key_id)
+        .unwrap_or_default();
 
     Ok(CreateApiKeyResponse {
         plaintext_api_key,
         record: ApiKeySummary {
-            id: id.to_owned(),
-            key_name: String::new(),
-            key_hash_prefix,
-            enabled: true,
-            mapping_policies: Vec::new(),
-            last_used_at: None,
-            created_at: chrono::Utc::now(),
+            id: key_id,
+            key_name: row.try_get("key_name")?,
+            key_hash_prefix: row.try_get("key_hash_prefix")?,
+            enabled: row.try_get("enabled")?,
+            mapping_policies,
+            last_used_at: row.try_get("last_used_at")?,
+            created_at: row.try_get("created_at")?,
         },
     })
 }

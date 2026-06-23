@@ -72,7 +72,11 @@ fn api_routes() -> OpenApiRouter<Arc<AppState>> {
         ))
         .routes(routes!(providers, create_provider))
         .routes(routes!(provider_available_models))
-        .routes(routes!(provider_models, create_provider_model))
+        .routes(routes!(
+            provider_models,
+            create_provider_model,
+            delete_provider_model
+        ))
         .routes(routes!(mapping_policies, create_mapping_policy))
         .routes(routes!(
             get_mapping_policy,
@@ -246,6 +250,22 @@ async fn create_provider_model(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/v1/provider-models/{id}",
+    tag = "Provider Models",
+    params(("id" = String, Path, description = "Provider model identifier.")),
+    responses((status = NO_CONTENT, description = "Delete a provider model. Routes that reference it are removed."))
+)]
+async fn delete_provider_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let pool = database_pool(&state)?;
+    repositories::delete_provider_model(pool, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     get,
     path = "/v1/mapping-policies",
     tag = "Mapping Policies",
@@ -314,7 +334,7 @@ async fn update_mapping_policy(
     path = "/v1/mapping-policies/{id}",
     tag = "Mapping Policies",
     params(("id" = String, Path, description = "Mapping policy identifier.")),
-    responses((status = OK, description = "Delete a mapping policy."))
+    responses((status = NO_CONTENT, description = "Delete a mapping policy."))
 )]
 async fn delete_mapping_policy(
     State(state): State<Arc<AppState>>,
@@ -322,7 +342,7 @@ async fn delete_mapping_policy(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::delete_mapping_policy(pool, &id).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ── API Key ↔ Mapping Policy ──
@@ -367,7 +387,7 @@ struct UpdateApiKeyRequest {
     tag = "API Keys",
     params(("id" = String, Path, description = "API key identifier.")),
     request_body = UpdateApiKeyRequest,
-    responses((status = OK, description = "Update an API key."))
+    responses((status = NO_CONTENT, description = "Update an API key."))
 )]
 async fn update_api_key(
     State(state): State<Arc<AppState>>,
@@ -376,7 +396,7 @@ async fn update_api_key(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::update_api_key(pool, &id, &request.key_name, request.enabled).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -384,7 +404,7 @@ async fn update_api_key(
     path = "/v1/api-keys/{id}",
     tag = "API Keys",
     params(("id" = String, Path, description = "API key identifier.")),
-    responses((status = OK, description = "Delete an API key."))
+    responses((status = NO_CONTENT, description = "Delete an API key."))
 )]
 async fn delete_api_key(
     State(state): State<Arc<AppState>>,
@@ -392,7 +412,7 @@ async fn delete_api_key(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::delete_api_key(pool, &id).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -415,7 +435,7 @@ async fn rotate_api_key(
     path = "/v1/epichust-models/{id}",
     tag = "Models",
     params(("id" = String, Path, description = "Model identifier.")),
-    responses((status = OK, description = "Delete an Epichust model."))
+    responses((status = NO_CONTENT, description = "Delete an Epichust model."))
 )]
 async fn delete_epichust_model(
     State(state): State<Arc<AppState>>,
@@ -423,7 +443,7 @@ async fn delete_epichust_model(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::delete_epichust_model(pool, &id).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -431,7 +451,7 @@ async fn delete_epichust_model(
     path = "/v1/providers/{id}",
     tag = "Providers",
     params(("id" = String, Path, description = "Provider identifier.")),
-    responses((status = OK, description = "Delete a provider and its models."))
+    responses((status = NO_CONTENT, description = "Delete a provider and its models."))
 )]
 async fn delete_provider(
     State(state): State<Arc<AppState>>,
@@ -439,7 +459,7 @@ async fn delete_provider(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::delete_provider(pool, &id).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -469,7 +489,7 @@ async fn attach_api_key_mapping_policy(
         ("api_key_id" = String, Path, description = "API key identifier."),
         ("mapping_policy_id" = String, Path, description = "Mapping policy identifier.")
     ),
-    responses((status = OK, description = "Detach a mapping policy from an API key."))
+    responses((status = NO_CONTENT, description = "Detach a mapping policy from an API key."))
 )]
 async fn detach_api_key_mapping_policy(
     State(state): State<Arc<AppState>>,
@@ -477,7 +497,7 @@ async fn detach_api_key_mapping_policy(
 ) -> Result<impl IntoResponse, ApiError> {
     let pool = database_pool(&state)?;
     repositories::detach_api_key_mapping_policy(pool, &api_key_id, &mapping_policy_id).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -535,6 +555,37 @@ impl ApiError {
 
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
+        // Map well-known PostgreSQL SQLSTATE codes to actionable client errors
+        // instead of an opaque 500. See https://www.postgresql.org/docs/current/errcodes-appendix.html
+        if let Some(db_err) = error.as_database_error() {
+            let code = db_err.code().unwrap_or_default();
+            match code.as_ref() {
+                "23505" => {
+                    return Self {
+                        status: StatusCode::CONFLICT,
+                        error_type: "duplicate",
+                        message: "a record with the same unique value already exists".to_owned(),
+                    }
+                }
+                "23503" => {
+                    return Self {
+                        status: StatusCode::CONFLICT,
+                        error_type: "foreign_key_violation",
+                        message:
+                            "this record is still referenced by, or references, another record"
+                                .to_owned(),
+                    }
+                }
+                "23514" => {
+                    return Self {
+                        status: StatusCode::BAD_REQUEST,
+                        error_type: "check_violation",
+                        message: "a field value violates a database constraint".to_owned(),
+                    }
+                }
+                _ => {}
+            }
+        }
         tracing::error!(?error, "admin-api database operation failed");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,

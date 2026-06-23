@@ -2051,6 +2051,7 @@ dependencies = [
  "pingora-http",
  "pingora-proxy",
  "prometheus",
+ "reqwest",
  "serde_json",
  "sqlx",
  "tokio",

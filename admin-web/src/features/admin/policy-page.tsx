@@ -109,7 +109,9 @@ function PolicyPageContent({
           id: item.id,
           input: {
             routing_strategy: draft.routing_strategy,
-            rate_limit_rules: draft.rate_limit_rules.length > 0 ? draft.rate_limit_rules : undefined,
+            // Always send the array (empty = clear all rules). Sending undefined
+            // would make the backend keep the existing rules.
+            rate_limit_rules: draft.rate_limit_rules,
             enabled: draft.enabled,
             routes: draft.routes.map((r) => ({
               provider_model_id: r.provider_model_id, weight: r.weight,

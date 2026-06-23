@@ -1,7 +1,16 @@
 import type { ModelType, RoutingStrategy, RateLimitRule } from "@/lib/api"
 import { create } from "zustand"
 
-export type SidebarResource = "keys" | "providers" | "models" | "policies"
+export type SidebarResource =
+  | "dashboard"
+  | "providers"
+  | "models"
+  | "routes"
+  | "keys"
+  | "audit"
+
+/** Sections that render a master ListPanel + detail; the rest are full-width. */
+export const LIST_SECTIONS: SidebarResource[] = ["providers", "models", "routes", "keys"]
 
 export const NEW_SIDEBAR_ITEM_ID = "__new__"
 
@@ -29,6 +38,7 @@ type PolicyDraft = {
 
 type AdminStore = {
   sidebarResource: SidebarResource
+  navExpanded: boolean
   selectedSidebarItemId: string
   modelDraft: ModelDraft
   providerDraft: ProviderDraft
@@ -36,6 +46,7 @@ type AdminStore = {
   policyDraft: PolicyDraft
   generatedApiKey: string
   setSidebarResource: (resource: SidebarResource) => void
+  setNavExpanded: (expanded: boolean) => void
   setSelectedSidebarItemId: (id: string) => void
   setModelDraft: (draft: Partial<ModelDraft>) => void
   setProviderDraft: (draft: Partial<ProviderDraft>) => void
@@ -45,7 +56,8 @@ type AdminStore = {
 }
 
 export const useAdminStore = create<AdminStore>()((set) => ({
-  sidebarResource: "keys",
+  sidebarResource: "dashboard",
+  navExpanded: true,
   selectedSidebarItemId: "",
   modelDraft: {
     model_name: "epichust-chat",
@@ -71,6 +83,7 @@ export const useAdminStore = create<AdminStore>()((set) => ({
       selectedSidebarItemId: "",
       sidebarResource: resource,
     }),
+  setNavExpanded: (expanded) => set({ navExpanded: expanded }),
   setSelectedSidebarItemId: (id) => set({ selectedSidebarItemId: id }),
   setModelDraft: (draft) =>
     set((state) => ({

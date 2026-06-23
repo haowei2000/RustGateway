@@ -8,6 +8,7 @@ import "@/styles/app.css"
 import "@/styles/sidebar.css"
 import "@/styles/item-list.css"
 import "@/styles/content-page.css"
+import "@/styles/console.css"
 
 const queryClient = new QueryClient({
   defaultOptions: {

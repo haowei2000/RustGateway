@@ -1,0 +1,4 @@
+/* The original design project ships Inter as local woff2 files. They are
+   binary and large (over the design MCP read cap), so this import is left as a
+   no-op — the body font-family falls back to system Inter / system-ui. To get
+   the exact webfont, drop inter-*.woff2 here and restore the @font-face rules. */

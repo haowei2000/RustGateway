@@ -80,7 +80,7 @@ function ApiKeyPageContent({
   const { setSidebarResource, setSelectedSidebarItemId } = useAdminStore()
 
   function navigateToPolicy(policyId: string) {
-    setSidebarResource("policies")
+    setSidebarResource("routes")
     setSelectedSidebarItemId(policyId)
   }
 

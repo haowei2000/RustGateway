@@ -11,6 +11,7 @@ import {
   deleteEpichustModel,
   deleteMappingPolicy,
   deleteProvider,
+  deleteProviderModel,
   detachApiKeyMappingPolicy,
   getAdminData,
   rotateApiKey,
@@ -179,6 +180,17 @@ export function useDeleteProvider() {
 
   return useMutation({
     mutationFn: (id: string) => deleteProvider(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
+    },
+  })
+}
+
+export function useDeleteProviderModel() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => deleteProviderModel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminDataQueryKey })
     },

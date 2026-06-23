@@ -193,12 +193,25 @@ async function requestJson<T>(
   }
   const response = await fetch(`${apiBasePath}/${path}`, init)
   if (!response.ok) {
-    throw new Error(`${method} ${path} failed with ${response.status}`)
+    // Surface the backend error message ({ error: { message, type } }) when present.
+    let detail = ""
+    try {
+      const errBody = (await response.json()) as {
+        error?: { message?: string }
+      }
+      if (errBody?.error?.message) detail = `: ${errBody.error.message}`
+    } catch {
+      // response had no JSON body
+    }
+    throw new Error(`${method} ${path} failed with ${response.status}${detail}`)
   }
+  // 204, or any other empty body (delete/update endpoints return an empty 2xx):
+  // reading text first avoids "Unexpected end of JSON input" on response.json().
   if (response.status === 204) {
     return undefined as T
   }
-  return response.json() as Promise<T>
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -246,6 +259,10 @@ export function getProviderAvailableModels(providerId: string) {
 
 export function createProviderModel(input: CreateProviderModelRequest) {
   return postJson<ProviderModel>("provider-models", input)
+}
+
+export function deleteProviderModel(id: string) {
+  return requestJson<void>("DELETE", `provider-models/${id}`)
 }
 
 // ── Mapping Policy API ──

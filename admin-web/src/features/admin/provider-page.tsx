@@ -5,7 +5,12 @@ import { Button } from "@/components/ui/button"
 import { InputModal } from "@/components/ui/add-item-modal"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useCreateProvider, useCreateProviderModel, useDeleteProvider } from "@/hooks/use-admin-data"
+import {
+  useCreateProvider,
+  useCreateProviderModel,
+  useDeleteProvider,
+  useDeleteProviderModel,
+} from "@/hooks/use-admin-data"
 import { getProviderAvailableModels } from "@/lib/api"
 import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
@@ -56,7 +61,31 @@ function ProviderPageContent({
   const createProviderMutation = useCreateProvider()
   const createProviderModelMutation = useCreateProviderModel()
   const deleteProviderMutation = useDeleteProvider()
+  const deleteProviderModelMutation = useDeleteProviderModel()
   const isNew = !item
+
+  async function removeProviderModel(model: ProviderModel) {
+    // Persisted model → delete via API (cascades its policy routes);
+    // unsaved draft model (new provider) → just drop locally.
+    if (item && !model.id.startsWith("draft_")) {
+      try {
+        await deleteProviderModelMutation.mutateAsync(model.id)
+        setDraft((c) => ({
+          ...c,
+          providerModels: c.providerModels.filter((m) => m.id !== model.id),
+        }))
+        setNotice(`Model "${model.model_name}" deleted.`)
+        onRefresh()
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : "Delete failed.")
+      }
+      return
+    }
+    setDraft((c) => ({
+      ...c,
+      providerModels: c.providerModels.filter((m) => m.id !== model.id),
+    }))
+  }
 
   useEffect(() => {
     if (item && draft.providerModels.length === 0 && !fetchedOnce) {
@@ -216,10 +245,10 @@ function ProviderPageContent({
                 className="sub-item-action"
                 role="button"
                 tabIndex={0}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDraft((c) => ({ ...c, providerModels: c.providerModels.filter((m) => m.id !== model.id) })) } }}
-                onClick={(e) => { e.stopPropagation(); setDraft((c) => ({ ...c, providerModels: c.providerModels.filter((m) => m.id !== model.id) })) }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); removeProviderModel(model) } }}
+                onClick={(e) => { e.stopPropagation(); removeProviderModel(model) }}
               >
-                <Trash2 className="icon-sm" /> Unattach
+                <Trash2 className="icon-sm" /> Delete
               </span>
             }
           />

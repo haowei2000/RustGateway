@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API Gateway Console</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #34374C; background: #F6F6F6; -webkit-font-smoothing: antialiased;
+    --ix: var(--primary);            /* interaction accent (tweakable) */
+    --ixc: #F6F6F6;                  /* foreground on interaction accent */
+    --hair: rgba(52,55,76,0.09);
+    --hair2: rgba(52,55,76,0.06);
+    --fill: #F1F1F4;                 /* muted field fill */
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  #root { height: 100vh; }
+  ::selection { background: rgba(238,43,71,0.16); }
+
+  /* thin scrollbars */
+  .scroll { overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(52,55,76,0.22) transparent; }
+  .scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(52,55,76,0.18); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+  .scroll::-webkit-scrollbar-thumb:hover { background: rgba(52,55,76,0.32); background-clip: padding-box; }
+
+  /* ---- tooltip system (icon + hover) ---- */
+  .tip { position: relative; display: inline-flex; }
+  .tip::after {
+    content: attr(data-tip); position: absolute; z-index: 120; white-space: nowrap;
+    padding: 5px 9px; border-radius: 7px; font-size: 12px; font-weight: 500; line-height: 1;
+    letter-spacing: 0.01em; opacity: 0; pointer-events: none;
+    transition: opacity .13s ease, transform .13s ease;
+    box-shadow: 0 8px 26px rgba(0,0,0,0.18);
+  }
+  .tip[data-tip=""]::after { display: none; }
+  .tip-right::after  { left: calc(100% + 11px); top: 50%; transform: translateY(-50%) translateX(-4px); }
+  .tip-right:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+  .tip-left::after   { right: calc(100% + 11px); top: 50%; transform: translateY(-50%) translateX(4px); }
+  .tip-left:hover::after  { opacity: 1; transform: translateY(-50%) translateX(0); }
+  .tip-down::after   { top: calc(100% + 9px); left: 50%; transform: translateX(-50%) translateY(-4px); }
+  .tip-down:hover::after  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .tip-downr::after  { top: calc(100% + 9px); right: 0; transform: translateY(-4px); }
+  .tip-downr:hover::after { opacity: 1; transform: translateY(0); }
+  /* themes */
+  body[data-tiptheme="dark"]   .tip::after { background: #1d1f2c; color: #fff; }
+  body[data-tiptheme="light"]  .tip::after { background: #fff; color: #34374C; border: 1px solid var(--hair); box-shadow: 0 10px 30px rgba(52,55,76,0.16); }
+  body[data-tiptheme="accent"] .tip::after { background: #EE2B47; color: #fff; }
+
+  /* ---- icon buttons ---- */
+  .ibtn {
+    display: inline-grid; place-items: center; border: 0; cursor: pointer; background: transparent;
+    color: inherit; border-radius: 8px; transition: background .12s ease, color .12s ease;
+    width: 32px; height: 32px; flex: 0 0 auto; padding: 0;
+  }
+  .ibtn:hover { background: rgba(52,55,76,0.07); }
+  .ibtn.on { background: var(--fill); }
+
+  /* ---- chart bars ---- */
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; }
+  .bar { flex: 1; min-width: 0; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, rgba(52,55,76,0.55), rgba(52,55,76,0.20)); transition: background .15s; }
+  .bar:hover { background: linear-gradient(180deg, var(--ix), color-mix(in oklab, var(--ix) 55%, transparent)); }
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; }
+  .spark i { flex: 1; border-radius: 2px; background: rgba(52,55,76,0.20); }
+
+  /* ---- misc ---- */
+  .sw { width: 38px; height: 22px; border-radius: 99px; background: rgba(52,55,76,0.20); position: relative; cursor: pointer; transition: background .15s; flex: 0 0 auto; border: 0; padding: 0; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: transform .16s ease; }
+  .sw.on { background: var(--ix); }
+  .sw.on::after { transform: translateX(16px); }
+
+  .mono { font-family: var(--mono); }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .nowrap { white-space: nowrap; }
+  .fade-in { animation: fade .22s ease both; }
+  @keyframes fade { from { transform: translateY(6px); } to { transform: none; } }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+</style>
+</head>
+<body data-tiptheme="dark">
+  <div id="root"></div>
+
+  <!-- React vendor: original prototype loaded ../_vendor/react{,-dom}.js (the
+       generated bundle exceeds the design MCP read cap), so we load the same
+       React 18 UMD builds from CDN. Babel was already CDN-loaded upstream. -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="../_ds_bundle.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="data.js"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="views-core.jsx"></script>
+  <script type="text/babel" src="views-admin.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

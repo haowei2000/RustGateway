@@ -13,6 +13,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY admin-api ./admin-api
+# gateway is a workspace member referenced by the root manifest, so cargo
+# needs its manifest present even when building only -p axum-admin-api.
+COPY gateway ./gateway
 COPY deploy/sql ./deploy/sql
 
 # Build with cargo cache mounts

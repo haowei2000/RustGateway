@@ -16,11 +16,40 @@ pub struct ProviderInfo {
     pub provider_key: String,
 }
 
-/// Resolved route: which upstream model name + which provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingStrategy {
+    Weighted,
+    Priority,
+    RoundRobin,
+}
+
+impl RoutingStrategy {
+    fn parse(value: &str) -> Self {
+        match value {
+            "priority" => RoutingStrategy::Priority,
+            "round_robin" => RoutingStrategy::RoundRobin,
+            _ => RoutingStrategy::Weighted,
+        }
+    }
+}
+
+/// One candidate upstream for an epichust model.
 #[derive(Debug, Clone)]
-pub struct ModelRoute {
+pub struct RouteCandidate {
     pub provider_model_name: String,
+    pub weight: u32,
+    // Kept for observability/future failover; ordering is done in SQL.
+    #[allow(dead_code)]
+    pub priority: u32,
     pub provider: ProviderInfo,
+}
+
+/// All enabled routes for an epichust model plus how to pick among them.
+/// `routes` is pre-sorted by priority ASC, then weight DESC.
+#[derive(Debug, Clone)]
+pub struct ModelTarget {
+    pub strategy: RoutingStrategy,
+    pub routes: Vec<RouteCandidate>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,8 +71,8 @@ impl RateLimitConfig {
 
 pub struct GatewayCache {
     pub key_hashes: HashSet<String>,
-    /// epichust_model_name → resolved route (first enabled route in first enabled policy)
-    pub model_routes: HashMap<String, ModelRoute>,
+    /// epichust_model_name → all enabled routes + the policy's routing strategy
+    pub model_routes: HashMap<String, ModelTarget>,
     /// key_hash → aggregated rate limit rules from attached policies
     pub rate_limits: HashMap<String, RateLimitConfig>,
 }
@@ -70,17 +99,22 @@ async fn load_key_hashes(pool: &PgPool) -> Result<HashSet<String>> {
         .collect())
 }
 
-/// Load model mappings: epichust_model_name → (provider_model_name, provider info).
-/// Picks the first enabled route in the first enabled policy for each epichust model.
-async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelRoute>> {
+/// Load every enabled route for every enabled policy, grouped by epichust
+/// model name. Rows arrive sorted by (priority ASC, weight DESC) so each
+/// target's `routes` vec is already in preference order. When several policies
+/// target the same model, the strategy of the most-preferred route is used.
+async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelTarget>> {
     let rows = sqlx::query(
         r#"
-        SELECT DISTINCT ON (em.model_name)
+        SELECT
             em.model_name AS epichust_model_name,
             pm.model_name AS provider_model_name,
             p.provider_name,
             p.provider_base_url,
-            p.provider_key_ciphertext
+            p.provider_key_ciphertext,
+            mpr.weight,
+            mpr.priority,
+            mp.routing_strategy
         FROM mapping_policies mp
         JOIN epichust_models em ON em.id = mp.epichust_model_id
         JOIN mapping_policy_routes mpr ON mpr.mapping_policy_id = mp.id
@@ -93,21 +127,30 @@ async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelRoute>>
     .fetch_all(pool)
     .await?;
 
-    let mut map = HashMap::new();
+    let mut map: HashMap<String, ModelTarget> = HashMap::new();
     for row in &rows {
         let epichust_name: String = row.try_get("epichust_model_name")?;
         let ciphertext: Vec<u8> = row.try_get("provider_key_ciphertext")?;
-        map.insert(
-            epichust_name,
-            ModelRoute {
-                provider_model_name: row.try_get("provider_model_name")?,
-                provider: ProviderInfo {
-                    provider_name: row.try_get("provider_name")?,
-                    provider_base_url: row.try_get("provider_base_url")?,
-                    provider_key: String::from_utf8_lossy(&ciphertext).into_owned(),
-                },
+        let weight: i32 = row.try_get("weight")?;
+        let priority: i32 = row.try_get("priority")?;
+        let strategy = RoutingStrategy::parse(&row.try_get::<String, _>("routing_strategy")?);
+        let candidate = RouteCandidate {
+            provider_model_name: row.try_get("provider_model_name")?,
+            weight: weight.max(0) as u32,
+            priority: priority.max(0) as u32,
+            provider: ProviderInfo {
+                provider_name: row.try_get("provider_name")?,
+                provider_base_url: row.try_get("provider_base_url")?,
+                provider_key: String::from_utf8_lossy(&ciphertext).into_owned(),
             },
-        );
+        };
+        map.entry(epichust_name)
+            .or_insert_with(|| ModelTarget {
+                strategy,
+                routes: Vec::new(),
+            })
+            .routes
+            .push(candidate);
     }
     Ok(map)
 }

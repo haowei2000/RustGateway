@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     time::Instant,
 };
 
@@ -21,7 +21,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::config::GatewayConfig;
-use crate::db::{Cache, RateLimitConfig};
+use crate::db::{Cache, ModelTarget, RateLimitConfig, RouteCandidate, RoutingStrategy};
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
 
@@ -93,6 +93,8 @@ fn record_rate_limit(store: &RateLimitStore, key_hash: &str, tokens: u64) {
 pub struct LlmGateway {
     cache: Cache,
     rate_limits: RateLimitStore,
+    /// epichust_model_name → round-robin cursor (survives cache refreshes)
+    rr_counters: Arc<Mutex<HashMap<String, u64>>>,
     requests_total: IntCounter,
     auth_failures_total: IntCounter,
     upstream_errors_total: IntCounter,
@@ -117,6 +119,7 @@ pub struct RequestContext {
     provider_name: Option<String>,
     provider_key: Option<String>,
     upstream_host: Option<String>,
+    upstream_port: Option<u16>,
 }
 
 impl LlmGateway {
@@ -127,6 +130,7 @@ impl LlmGateway {
         Ok(Self {
             cache,
             rate_limits: Arc::new(RwLock::new(HashMap::new())),
+            rr_counters: Arc::new(Mutex::new(HashMap::new())),
             requests_total: register_int_counter!("gateway_requests_total", "Total requests")?,
             auth_failures_total: register_int_counter!(
                 "gateway_auth_failures_total",
@@ -142,6 +146,45 @@ impl LlmGateway {
                 "Request latency"
             )?,
         })
+    }
+
+    /// Choose one upstream for `model` according to the policy's routing
+    /// strategy. `target.routes` is pre-sorted (priority ASC, weight DESC).
+    fn select_route(
+        &self,
+        model: &str,
+        target: &ModelTarget,
+        request_id: &Uuid,
+    ) -> Option<RouteCandidate> {
+        if target.routes.is_empty() {
+            return None;
+        }
+        let chosen = match target.strategy {
+            RoutingStrategy::Priority => &target.routes[0],
+            RoutingStrategy::RoundRobin => {
+                let mut counters = self.rr_counters.lock().unwrap();
+                let cursor = counters.entry(model.to_owned()).or_insert(0);
+                let idx = (*cursor as usize) % target.routes.len();
+                *cursor = cursor.wrapping_add(1);
+                &target.routes[idx]
+            }
+            RoutingStrategy::Weighted => {
+                let total: u64 = target.routes.iter().map(|r| r.weight.max(1) as u64).sum();
+                // request_id is a v4 UUID → uniformly random; use it as the dice roll.
+                let mut pick = (request_id.as_u128() % total as u128) as u64;
+                let mut selected = &target.routes[0];
+                for route in &target.routes {
+                    let w = route.weight.max(1) as u64;
+                    if pick < w {
+                        selected = route;
+                        break;
+                    }
+                    pick -= w;
+                }
+                selected
+            }
+        };
+        Some(chosen.clone())
     }
 }
 
@@ -167,6 +210,7 @@ impl ProxyHttp for LlmGateway {
             provider_name: None,
             provider_key: None,
             upstream_host: None,
+            upstream_port: None,
         }
     }
 
@@ -258,12 +302,18 @@ impl ProxyHttp for LlmGateway {
 
         // Resolve provider (will be refined in body filter if model matches a policy)
         if let Ok(cache) = self.cache.read() {
-            if let Some(route) = cache.model_routes.values().next() {
+            if let Some(route) = cache
+                .model_routes
+                .values()
+                .next()
+                .and_then(|target| target.routes.first())
+            {
                 ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
                 ctx.provider_name = Some(route.provider.provider_name.clone());
                 ctx.provider_key = Some(route.provider.provider_key.clone());
                 if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
                     ctx.upstream_host = u.host_str().map(|h| h.to_owned());
+                    ctx.upstream_port = u.port_or_known_default();
                 }
             }
         }
@@ -310,29 +360,35 @@ impl ProxyHttp for LlmGateway {
             ctx.stream = value.get("stream").and_then(|s| s.as_bool());
 
             if !model.is_empty() {
-                if let Ok(cache) = self.cache.read() {
-                    if let Some(route) = cache.model_routes.get(&model) {
-                        // Replace the model name in the parsed JSON value
-                        value["model"] =
-                            serde_json::Value::String(route.provider_model_name.clone());
-                        let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
-                        // Pad to original length so Content-Length stays valid
-                        while new_body.len() < ctx.body_buf.len() {
-                            new_body.push(b' ');
-                        }
-                        *body = Some(Bytes::from(new_body));
-                        ctx.body_rewritten = true;
-                        log::info!(
-                            "model translated: '{model}' → '{}'",
-                            route.provider_model_name
-                        );
+                // Select one upstream per the policy's routing strategy.
+                let selected = self.cache.read().ok().and_then(|cache| {
+                    cache
+                        .model_routes
+                        .get(&model)
+                        .and_then(|target| self.select_route(&model, target, &ctx.request_id))
+                });
+                if let Some(route) = selected {
+                    // Replace the model name in the parsed JSON value
+                    value["model"] = serde_json::Value::String(route.provider_model_name.clone());
+                    let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
+                    // Pad to original length so Content-Length stays valid
+                    while new_body.len() < ctx.body_buf.len() {
+                        new_body.push(b' ');
+                    }
+                    *body = Some(Bytes::from(new_body));
+                    ctx.body_rewritten = true;
+                    log::info!(
+                        "model translated: '{model}' → '{}' (provider {})",
+                        route.provider_model_name,
+                        route.provider.provider_name
+                    );
 
-                        ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
-                        ctx.provider_name = Some(route.provider.provider_name.clone());
-                        ctx.provider_key = Some(route.provider.provider_key.clone());
-                        if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
-                            ctx.upstream_host = u.host_str().map(|h| h.to_owned());
-                        }
+                    ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
+                    ctx.provider_name = Some(route.provider.provider_name.clone());
+                    ctx.provider_key = Some(route.provider.provider_key.clone());
+                    if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
+                        ctx.upstream_host = u.host_str().map(|h| h.to_owned());
+                        ctx.upstream_port = u.port_or_known_default();
                     }
                 }
             }
@@ -351,11 +407,8 @@ impl ProxyHttp for LlmGateway {
             .as_ref()
             .map(|u| u.starts_with("https://"))
             .unwrap_or(true);
-        Ok(Box::new(HttpPeer::new(
-            (host, if tls { 443 } else { 80 }),
-            tls,
-            host.to_owned(),
-        )))
+        let port = ctx.upstream_port.unwrap_or(if tls { 443 } else { 80 });
+        Ok(Box::new(HttpPeer::new((host, port), tls, host.to_owned())))
     }
 
     async fn upstream_request_filter(

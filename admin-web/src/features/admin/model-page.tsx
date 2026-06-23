@@ -51,7 +51,7 @@ function ModelPageContent({
   const modelPolicies = item ? data.policies.filter((p) => p.epichust_model_id === item.id) : []
 
   function navigateToPolicy(policyId: string) {
-    setSidebarResource("policies")
+    setSidebarResource("routes")
     setSelectedSidebarItemId(policyId)
   }
 

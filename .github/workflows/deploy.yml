@@ -29,6 +29,7 @@ jobs:
             cd /opt/llm-gateway
 
             echo "==> Pulling latest deploy config..."
+            git config --global --add safe.directory /opt/llm-gateway
             git pull
 
             echo "==> Pulling images (tag: ${{ inputs.image_tag }})..."

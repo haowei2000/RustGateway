@@ -10,6 +10,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../deploy/sql/002_mapping_policies.sql"),
     include_str!("../../deploy/sql/003_rate_limit_rules.sql"),
     include_str!("../../deploy/sql/004_audit_log_fk_set_null.sql"),
+    include_str!("../../deploy/sql/005_api_key_suffix.sql"),
 ];
 
 pub async fn connect(config: &AdminApiConfig) -> Result<Option<PgPool>> {

@@ -174,6 +174,8 @@ pub struct ApiKeySummary {
     pub id: String,
     pub key_name: String,
     pub key_hash_prefix: String,
+    /// Last 4 plaintext characters of the key, shown as a non-secret hint.
+    pub key_suffix: Option<String>,
     pub enabled: bool,
     pub mapping_policies: Vec<ApiKeyMappingPolicy>,
     pub last_used_at: Option<DateTime<Utc>>,

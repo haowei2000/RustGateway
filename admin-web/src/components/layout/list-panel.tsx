@@ -70,7 +70,7 @@ function buildRows(resource: SidebarResource, data: AdminData | undefined): List
       id: k.id,
       icon: KeyRound,
       title: k.key_name,
-      subtitle: `${k.key_hash_prefix}···· · ${k.mapping_policies.length} policies`,
+      subtitle: `${k.key_suffix ? `llmgw…${k.key_suffix}` : `${k.key_hash_prefix}…`} · ${k.mapping_policies.length} policies`,
       status: k.enabled ? "enabled" : "disabled",
     }))
   }

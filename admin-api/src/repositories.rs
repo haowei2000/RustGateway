@@ -682,6 +682,7 @@ pub async fn list_api_keys(pool: &PgPool) -> Result<Vec<ApiKeySummary>, sqlx::Er
             id,
             key_name,
             key_hash_prefix,
+            key_suffix,
             enabled,
             last_used_at,
             created_at
@@ -698,6 +699,7 @@ pub async fn list_api_keys(pool: &PgPool) -> Result<Vec<ApiKeySummary>, sqlx::Er
             id: row.try_get("id")?,
             key_name: row.try_get("key_name")?,
             key_hash_prefix: row.try_get("key_hash_prefix")?,
+            key_suffix: row.try_get("key_suffix")?,
             enabled: row.try_get("enabled")?,
             mapping_policies: Vec::new(),
             last_used_at: row.try_get("last_used_at")?,
@@ -714,6 +716,14 @@ pub async fn list_api_keys(pool: &PgPool) -> Result<Vec<ApiKeySummary>, sqlx::Er
     Ok(api_keys)
 }
 
+/// Last 4 plaintext characters of an API key — a non-secret display hint.
+fn key_suffix_of(plaintext: &str) -> String {
+    plaintext
+        .get(plaintext.len().saturating_sub(4)..)
+        .unwrap_or("")
+        .to_string()
+}
+
 pub async fn create_api_key(
     pool: &PgPool,
     request: CreateApiKeyRequest,
@@ -721,6 +731,7 @@ pub async fn create_api_key(
     let plaintext_api_key = format!("llmgw_{}", Uuid::new_v4().simple());
     let key_hash = hash_api_key(&plaintext_api_key);
     let key_hash_prefix = hash_prefix(&key_hash);
+    let key_suffix = key_suffix_of(&plaintext_api_key);
     let id = generated_id("key");
 
     let row = sqlx::query(
@@ -730,16 +741,18 @@ pub async fn create_api_key(
             key_name,
             key_hash,
             key_hash_prefix,
+            key_suffix,
             enabled
         )
-        VALUES ($1, $2, $3, $4, true)
-        RETURNING id, key_name, key_hash_prefix, enabled, last_used_at, created_at
+        VALUES ($1, $2, $3, $4, $5, true)
+        RETURNING id, key_name, key_hash_prefix, key_suffix, enabled, last_used_at, created_at
         "#,
     )
     .bind(&id)
     .bind(request.key_name.trim())
     .bind(key_hash)
     .bind(key_hash_prefix)
+    .bind(&key_suffix)
     .fetch_one(pool)
     .await?;
 
@@ -749,6 +762,7 @@ pub async fn create_api_key(
             id: row.try_get("id")?,
             key_name: row.try_get("key_name")?,
             key_hash_prefix: row.try_get("key_hash_prefix")?,
+            key_suffix: row.try_get("key_suffix")?,
             enabled: row.try_get("enabled")?,
             mapping_policies: Vec::new(),
             last_used_at: row.try_get("last_used_at")?,
@@ -776,17 +790,19 @@ pub async fn rotate_api_key(pool: &PgPool, id: &str) -> Result<CreateApiKeyRespo
     let plaintext_api_key = format!("llmgw_{}", Uuid::new_v4().simple());
     let key_hash = hash_api_key(&plaintext_api_key);
     let key_hash_prefix = hash_prefix(&key_hash);
+    let key_suffix = key_suffix_of(&plaintext_api_key);
 
     let row = sqlx::query(
         r#"
         UPDATE epichust_api_keys
-        SET key_hash = $1, key_hash_prefix = $2
-        WHERE id = $3
-        RETURNING id, key_name, key_hash_prefix, enabled, last_used_at, created_at
+        SET key_hash = $1, key_hash_prefix = $2, key_suffix = $3
+        WHERE id = $4
+        RETURNING id, key_name, key_hash_prefix, key_suffix, enabled, last_used_at, created_at
         "#,
     )
     .bind(&key_hash)
     .bind(&key_hash_prefix)
+    .bind(&key_suffix)
     .bind(id)
     .fetch_one(pool)
     .await?;
@@ -803,6 +819,7 @@ pub async fn rotate_api_key(pool: &PgPool, id: &str) -> Result<CreateApiKeyRespo
             id: key_id,
             key_name: row.try_get("key_name")?,
             key_hash_prefix: row.try_get("key_hash_prefix")?,
+            key_suffix: row.try_get("key_suffix")?,
             enabled: row.try_get("enabled")?,
             mapping_policies,
             last_used_at: row.try_get("last_used_at")?,

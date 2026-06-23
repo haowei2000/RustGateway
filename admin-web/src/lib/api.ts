@@ -139,6 +139,7 @@ export type ApiKeySummary = {
   id: string
   key_name: string
   key_hash_prefix: string
+  key_suffix: string | null
   enabled: boolean
   mapping_policies: ApiKeyMappingPolicy[]
   last_used_at: string | null

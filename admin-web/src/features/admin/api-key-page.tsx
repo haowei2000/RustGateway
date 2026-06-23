@@ -197,7 +197,13 @@ function ApiKeyPageContent({
             )}
           </>
         }
-        description={item ? `Hash prefix ${item.key_hash_prefix}` : "New API key draft"}
+        description={
+          item
+            ? item.key_suffix
+              ? `llmgw…${item.key_suffix}`
+              : `Hash prefix ${item.key_hash_prefix}`
+            : "New API key draft"
+        }
         icon={KeyRound}
         isFetching={isFetching}
         status={draft.enabled ? "enabled" : "disabled"}
@@ -223,6 +229,10 @@ function ApiKeyPageContent({
           </div>
           {item ? (
             <>
+              <ReadOnlyField
+                label="Key"
+                value={item.key_suffix ? `llmgw…${item.key_suffix}` : "— (rotate to capture)"}
+              />
               <ReadOnlyField label="Hash prefix" value={item.key_hash_prefix} />
               <ReadOnlyField label="Key ID" value={item.id} />
               <ReadOnlyField label="Last used" value={formatDate(item.last_used_at)} />

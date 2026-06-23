@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
 
   gateway:
-    image: ghcr.io/haowei2000/rustgateway/gateway:${IMAGE_TAG:-latest}
+    image: 47.99.42.4:5000/rustgateway/gateway:${IMAGE_TAG:-latest}
     ports:
       - "127.0.0.1:8080:8080"
     environment:
@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
 
   admin-api:
-    image: ghcr.io/haowei2000/rustgateway/admin-api:${IMAGE_TAG:-latest}
+    image: 47.99.42.4:5000/rustgateway/admin-api:${IMAGE_TAG:-latest}
     ports:
       - "127.0.0.1:9000:9000"
     environment:
@@ -80,7 +80,7 @@ services:
     restart: unless-stopped
 
   admin-web:
-    image: ghcr.io/haowei2000/rustgateway/admin-web:${IMAGE_TAG:-latest}
+    image: 47.99.42.4:5000/rustgateway/admin-web:${IMAGE_TAG:-latest}
     ports:
       - "127.0.0.1:3180:80"
     healthcheck:

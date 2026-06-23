@@ -21,9 +21,12 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::config::GatewayConfig;
-use crate::db::{Cache, ModelTarget, RateLimitConfig, RouteCandidate, RoutingStrategy};
+use crate::db::{
+    Cache, ModelTarget, ProviderInfo, RateLimitConfig, RouteCandidate, RoutingStrategy,
+};
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+const MAX_REQUEST_BODY: usize = 4 * 1024 * 1024;
 
 // ── Rate limiter ──────────────────────────────────────────────────
 
@@ -114,7 +117,7 @@ pub struct RequestContext {
     model: Option<String>,
     stream: Option<bool>,
     body_buf: Vec<u8>,
-    body_rewritten: bool,
+    body_emitted: bool,
     provider_base_url: Option<String>,
     provider_name: Option<String>,
     provider_key: Option<String>,
@@ -186,6 +189,78 @@ impl LlmGateway {
         };
         Some(chosen.clone())
     }
+
+    /// Point the context at a provider (base url, key, upstream host/port).
+    fn point_ctx_at_provider(&self, ctx: &mut RequestContext, p: &ProviderInfo) {
+        ctx.provider_base_url = Some(p.provider_base_url.clone());
+        ctx.provider_name = Some(p.provider_name.clone());
+        ctx.provider_key = Some(p.provider_key.clone());
+        if let Ok(u) = url::Url::parse(&p.provider_base_url) {
+            ctx.upstream_host = u.host_str().map(|h| h.to_owned());
+            ctx.upstream_port = u.port_or_known_default();
+        }
+    }
+
+    /// Content-based routing: parse the request body, pick the upstream from the
+    /// `model`'s policy, rewrite the model name to the provider's model, and
+    /// point ctx at that provider. Must run BEFORE upstream_peer connects.
+    /// Falls back to the first available route when the model has no policy.
+    /// Returns the body bytes to forward upstream.
+    fn route_on_model(&self, ctx: &mut RequestContext, raw: Vec<u8>) -> Vec<u8> {
+        let parsed = serde_json::from_slice::<serde_json::Value>(&raw).ok();
+        let model = parsed
+            .as_ref()
+            .and_then(|v| v.get("model"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_owned();
+        ctx.stream = parsed
+            .as_ref()
+            .and_then(|v| v.get("stream"))
+            .and_then(|s| s.as_bool());
+        if !model.is_empty() {
+            ctx.model = Some(model.clone());
+        }
+
+        let route = if model.is_empty() {
+            None
+        } else {
+            self.cache.read().ok().and_then(|cache| {
+                cache
+                    .model_routes
+                    .get(&model)
+                    .and_then(|t| self.select_route(&model, t, &ctx.request_id))
+            })
+        };
+
+        if let Some(route) = route {
+            self.point_ctx_at_provider(ctx, &route.provider);
+            if let Some(mut value) = parsed {
+                value["model"] = serde_json::Value::String(route.provider_model_name.clone());
+                log::info!(
+                    "model routed: '{model}' → '{}' (provider {})",
+                    route.provider_model_name,
+                    route.provider.provider_name
+                );
+                return serde_json::to_vec(&value).unwrap_or(raw);
+            }
+            return raw;
+        }
+
+        // No policy for this model — fall back to the first available route so
+        // un-mapped requests still reach an upstream (legacy behaviour).
+        if let Ok(cache) = self.cache.read() {
+            if let Some(first) = cache
+                .model_routes
+                .values()
+                .next()
+                .and_then(|t| t.routes.first())
+            {
+                self.point_ctx_at_provider(ctx, &first.provider);
+            }
+        }
+        raw
+    }
 }
 
 #[async_trait]
@@ -205,7 +280,7 @@ impl ProxyHttp for LlmGateway {
             model: None,
             stream: None,
             body_buf: Vec::new(),
-            body_rewritten: false,
+            body_emitted: false,
             provider_base_url: None,
             provider_name: None,
             provider_key: None,
@@ -300,23 +375,28 @@ impl ProxyHttp for LlmGateway {
         // Record request in rate limiter (tokens=0 for now; updated in response if possible)
         record_rate_limit(&self.rate_limits, &key_hash, 0);
 
-        // Resolve provider (will be refined in body filter if model matches a policy)
-        if let Ok(cache) = self.cache.read() {
-            if let Some(route) = cache
-                .model_routes
-                .values()
-                .next()
-                .and_then(|target| target.routes.first())
-            {
-                ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
-                ctx.provider_name = Some(route.provider.provider_name.clone());
-                ctx.provider_key = Some(route.provider.provider_key.clone());
-                if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
-                    ctx.upstream_host = u.host_str().map(|h| h.to_owned());
-                    ctx.upstream_port = u.port_or_known_default();
+        // Content-based routing: read the full request body and choose the
+        // upstream from the model BEFORE the upstream connection is opened.
+        // (Selecting in a later body filter is too late — the peer is fixed.)
+        let mut raw = Vec::new();
+        loop {
+            match session.read_request_body().await {
+                Ok(Some(chunk)) => {
+                    raw.extend_from_slice(&chunk);
+                    if raw.len() > MAX_REQUEST_BODY {
+                        return respond_json(
+                            session,
+                            413,
+                            json!({"error":{"message":"request body too large","type":"invalid_request_error"}}),
+                        )
+                        .await;
+                    }
                 }
+                Ok(None) => break,
+                Err(_) => break,
             }
         }
+        ctx.body_buf = self.route_on_model(ctx, raw);
 
         if ctx.provider_base_url.is_none() {
             return respond_json(
@@ -337,61 +417,19 @@ impl ProxyHttp for LlmGateway {
         &self,
         _session: &mut Session,
         body: &mut Option<Bytes>,
-        end_of_stream: bool,
+        _end_of_stream: bool,
         ctx: &mut Self::CTX,
     ) -> Result<()>
     where
         Self::CTX: Send + Sync,
     {
-        if let Some(ref data) = body {
-            ctx.body_buf.extend_from_slice(data);
-        }
-        if !end_of_stream || ctx.body_rewritten || ctx.body_buf.is_empty() {
-            return Ok(());
-        }
-
-        if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_buf) {
-            let model = value
-                .get("model")
-                .and_then(|m| m.as_str())
-                .unwrap_or("")
-                .to_owned();
-            ctx.model = Some(model.clone());
-            ctx.stream = value.get("stream").and_then(|s| s.as_bool());
-
-            if !model.is_empty() {
-                // Select one upstream per the policy's routing strategy.
-                let selected = self.cache.read().ok().and_then(|cache| {
-                    cache
-                        .model_routes
-                        .get(&model)
-                        .and_then(|target| self.select_route(&model, target, &ctx.request_id))
-                });
-                if let Some(route) = selected {
-                    // Replace the model name in the parsed JSON value
-                    value["model"] = serde_json::Value::String(route.provider_model_name.clone());
-                    let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
-                    // Pad to original length so Content-Length stays valid
-                    while new_body.len() < ctx.body_buf.len() {
-                        new_body.push(b' ');
-                    }
-                    *body = Some(Bytes::from(new_body));
-                    ctx.body_rewritten = true;
-                    log::info!(
-                        "model translated: '{model}' → '{}' (provider {})",
-                        route.provider_model_name,
-                        route.provider.provider_name
-                    );
-
-                    ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
-                    ctx.provider_name = Some(route.provider.provider_name.clone());
-                    ctx.provider_key = Some(route.provider.provider_key.clone());
-                    if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
-                        ctx.upstream_host = u.host_str().map(|h| h.to_owned());
-                        ctx.upstream_port = u.port_or_known_default();
-                    }
-                }
-            }
+        // The body was fully read and rewritten in request_filter; emit it once
+        // to the upstream, then drop any further (already-consumed) chunks.
+        if ctx.body_emitted {
+            *body = None;
+        } else {
+            *body = Some(Bytes::from(std::mem::take(&mut ctx.body_buf)));
+            ctx.body_emitted = true;
         }
         Ok(())
     }
@@ -423,6 +461,9 @@ impl ProxyHttp for LlmGateway {
         if let Some(ref key) = ctx.provider_key {
             upstream_request.insert_header("Authorization", format!("Bearer {key}"))?;
         }
+        // We buffered + (maybe) rewrote the body in request_filter and emit it
+        // ourselves, so set the exact length the upstream should expect.
+        upstream_request.insert_header("Content-Length", ctx.body_buf.len().to_string())?;
         Ok(())
     }
 

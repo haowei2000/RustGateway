@@ -15,6 +15,7 @@ import {
 import { getProviderAvailableModels } from "@/lib/api"
 import type { AdminData, ProviderModel, ProviderSummary } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
+import { useToast } from "@/stores/toast-store"
 
 import {
   EmptyResourcePage,
@@ -56,7 +57,12 @@ function ProviderPageContent({
 }: { data: AdminData; isFetching: boolean; item?: ProviderSummary; onRefresh: () => void }) {
   const [draft, setDraft] = useState<ProviderDraft>(() => createProviderDraft(item, data))
   const [showModelModal, setShowModelModal] = useState(false)
-  const [notice, setNotice] = useState("")
+  const [notice, setNoticeState] = useState("")
+  const toast = useToast()
+  const setNotice = (message: string) => {
+    setNoticeState(message)
+    toast.auto(message)
+  }
   const [fetching, setFetching] = useState(false)
   const [fetchedOnce, setFetchedOnce] = useState(false)
   const createProviderMutation = useCreateProvider()

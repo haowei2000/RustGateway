@@ -15,6 +15,8 @@ import {
 } from "@/hooks/use-admin-data"
 import type { AdminData, ApiKeyMappingPolicy, ApiKeySummary, MappingPolicy } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
+import { useToast } from "@/stores/toast-store"
+import { SecretRevealModal } from "@/components/ui/secret-reveal-modal"
 
 import {
   EmptyResourcePage,
@@ -61,8 +63,14 @@ function ApiKeyPageContent({
   const [draft, setDraft] = useState<ApiKeyDraft>(() => createApiKeyDraft(item))
   const [showPolicyModal, setShowPolicyModal] = useState(false)
   const [showDocsModal, setShowDocsModal] = useState(false)
-  const [notice, setNotice] = useState("")
+  const [notice, setNoticeState] = useState("")
+  const toast = useToast()
+  const setNotice = (message: string) => {
+    setNoticeState(message)
+    toast.auto(message)
+  }
   const [docsKey, setDocsKey] = useState("")
+  const [newSecret, setNewSecret] = useState("")
   const createApiKeyMutation = useCreateApiKey()
   const attachPolicyMutation = useAttachApiKeyMappingPolicy()
   const detachPolicyMutation = useDetachApiKeyMappingPolicy()
@@ -89,7 +97,8 @@ function ApiKeyPageContent({
     try {
       const result = await rotateApiKeyMutation.mutateAsync(item.id)
       setDocsKey(result.plaintext_api_key)
-      setNotice(`Key rotated! New key: ${result.plaintext_api_key}`)
+      setNewSecret(result.plaintext_api_key)
+      setNotice("Key rotated.")
       onRefresh()
     } catch (e) { setNotice(e instanceof Error ? e.message : "Rotate failed.") }
   }
@@ -108,7 +117,8 @@ function ApiKeyPageContent({
     try {
       const result = await createApiKeyMutation.mutateAsync({ key_name: draft.key_name.trim() || "New API Key" })
       setDocsKey(result.plaintext_api_key)
-      setNotice(`API key created! Copy your key now: ${result.plaintext_api_key}`)
+      setNewSecret(result.plaintext_api_key)
+      setNotice("API key created.")
       onRefresh()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to create API key.")
@@ -262,6 +272,14 @@ function ApiKeyPageContent({
       </SubItemList>
 
       {notice && <ResourceNotice>{notice}</ResourceNotice>}
+
+      {newSecret ? (
+        <SecretRevealModal
+          title={isNew ? "API key created" : "API key rotated"}
+          secret={newSecret}
+          onClose={() => setNewSecret("")}
+        />
+      ) : null}
 
       <AddItemModal
         confirmLabel="Attach selected"

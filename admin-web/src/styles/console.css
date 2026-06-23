@@ -769,3 +769,164 @@
 .drawer-field-value.mono {
   font-family: var(--mono);
 }
+
+/* ── Toasts ────────────────────────────────────────────────────── */
+
+.toaster {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 280px;
+  max-width: min(92vw, 460px);
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: #fff;
+  border: 1px solid var(--hair);
+  box-shadow: 0 12px 32px rgba(20, 21, 30, 0.18);
+  pointer-events: auto;
+  animation: toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.toast-msg {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  color: #34374c;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.toast-close:hover {
+  background: var(--fill);
+  color: #34374c;
+}
+
+.toast-success {
+  border-left: 4px solid #1f9d57;
+}
+.toast-success .toast-icon {
+  color: #1f9d57;
+}
+
+.toast-error {
+  border-left: 4px solid #ee2b47;
+}
+.toast-error .toast-icon {
+  color: #ee2b47;
+}
+
+.toast-info {
+  border-left: 4px solid var(--ix);
+}
+.toast-info .toast-icon {
+  color: var(--ix);
+}
+
+/* ── Button press feedback (global) ────────────────────────────── */
+
+.console-shell button:not(:disabled):active {
+  transform: translateY(0.5px) scale(0.98);
+}
+
+.console-shell button:not(:disabled) {
+  transition: transform 0.08s ease, background-color 0.12s ease, color 0.12s ease,
+    box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+/* ── Reveal-secret modal (new API key, shown once) ─────────────── */
+
+.secret-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+  padding: 12px 13px;
+  border: 1px solid var(--hair);
+  border-radius: 9px;
+  background: var(--fill);
+}
+
+.secret-value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: #34374c;
+  overflow-wrap: anywhere;
+}
+
+.secret-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ix);
+  color: var(--ixc, #f6f6f6);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secret-copy.copied {
+  background: #1f9d57;
+}
+
+.secret-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(238, 43, 71, 0.07);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #34374c;
+}

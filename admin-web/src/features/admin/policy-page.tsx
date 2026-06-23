@@ -18,6 +18,7 @@ import type {
   UsageLimitType,
 } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID } from "@/stores/admin-store"
+import { useToast } from "@/stores/toast-store"
 
 import {
   EmptyResourcePage,
@@ -78,7 +79,12 @@ function PolicyPageContent({
   data, isFetching, item, onRefresh,
 }: { data: AdminData; isFetching: boolean; item?: MappingPolicy; onRefresh: () => void }) {
   const [draft, setDraft] = useState<PolicyDraft>(() => createPolicyDraft(item))
-  const [notice, setNotice] = useState("")
+  const [notice, setNoticeState] = useState("")
+  const toast = useToast()
+  const setNotice = (message: string) => {
+    setNoticeState(message)
+    toast.auto(message)
+  }
   const [showRateLimitModal, setShowRateLimitModal] = useState(false)
   const [showAddRoute, setShowAddRoute] = useState(false)
   const [newRouteModelId, setNewRouteModelId] = useState("")

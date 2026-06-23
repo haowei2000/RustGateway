@@ -11,6 +11,7 @@ import {
 } from "@/hooks/use-admin-data"
 import type { AdminData, EpichustModel, ModelType } from "@/lib/api"
 import { NEW_SIDEBAR_ITEM_ID, useAdminStore } from "@/stores/admin-store"
+import { useToast } from "@/stores/toast-store"
 
 import {
   EmptyResourcePage,
@@ -46,7 +47,12 @@ function ModelPageContent({
   data, isFetching, item, onRefresh,
 }: { data: AdminData; isFetching: boolean; item?: EpichustModel; onRefresh: () => void }) {
   const [draft, setDraft] = useState<ModelDraft>(() => createModelDraft(item))
-  const [notice, setNotice] = useState("")
+  const [notice, setNoticeState] = useState("")
+  const toast = useToast()
+  const setNotice = (message: string) => {
+    setNoticeState(message)
+    toast.auto(message)
+  }
   const createMutation = useCreateEpichustModel()
   const deleteMutation = useDeleteEpichustModel()
   const updateMutation = useUpdateEpichustModel()

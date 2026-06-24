@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex, RwLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -11,7 +11,7 @@ use llm_gateway_common::{
     api_key::{hash_api_key, hash_prefix, parse_bearer_token},
     audit::{AuditEvent, AuthResult},
 };
-use pingora_core::{upstreams::peer::HttpPeer, Error, Result};
+use pingora_core::{protocols::TcpKeepalive, upstreams::peer::HttpPeer, Error, Result};
 use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::{ProxyHttp, Session};
 use prometheus::{
@@ -27,6 +27,10 @@ use crate::config::GatewayConfig;
 use crate::db::{Cache, ModelTarget, RateLimitConfig, RouteCandidate, RoutingStrategy};
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+// OpenAI-compatible model-listing endpoint. Clients (Dify, OpenAI SDK, etc.)
+// hit this for model discovery / credential validation. Some strip the `/v1`
+// prefix, so both spellings are accepted.
+const MODELS_PATHS: [&str; 2] = ["/v1/models", "/models"];
 const MAX_REQUEST_BODY: usize = 4 * 1024 * 1024;
 
 // ── Rate limiter ──────────────────────────────────────────────────
@@ -39,7 +43,11 @@ struct RateLimitEntry {
     tokens: u64,
 }
 
-fn check_rate_limit(
+/// Prune the 60s window, check limits, and—if within them—record this request,
+/// all under a single write lock. Returns `Some(reason)` when the request must
+/// be rejected. Only call this for keys that actually have limits configured, so
+/// unlimited keys never touch this global lock (and never accumulate state).
+fn check_and_record_rate_limit(
     store: &RateLimitStore,
     key_hash: &str,
     config: &RateLimitConfig,
@@ -61,8 +69,7 @@ fn check_rate_limit(
         let count = entries.len() as i32;
         if count >= limit {
             return Some(format!(
-                "rate limit exceeded: {} requests per minute (limit: {limit})",
-                count
+                "rate limit exceeded: {count} requests per minute (limit: {limit})"
             ));
         }
     }
@@ -77,19 +84,13 @@ fn check_rate_limit(
         }
     }
 
-    // per-day checks are best-effort (we only keep 60s window in memory);
-    // for a full implementation, use Redis counters.
+    // Within limits — record this request (tokens=0 for now; per-day limits are
+    // best-effort and need Redis counters for a full implementation).
+    entries.push_back(RateLimitEntry {
+        timestamp: now,
+        tokens: 0,
+    });
     None
-}
-
-fn record_rate_limit(store: &RateLimitStore, key_hash: &str, tokens: u64) {
-    let mut map = store.write().unwrap();
-    map.entry(key_hash.to_owned())
-        .or_default()
-        .push_back(RateLimitEntry {
-            timestamp: Instant::now(),
-            tokens,
-        });
 }
 
 // ── Gateway ───────────────────────────────────────────────────────
@@ -124,8 +125,10 @@ pub struct RequestContext {
     /// in request_filter, so request_body_filter doesn't re-roll the route).
     upstream_model: Option<String>,
     stream: Option<bool>,
-    body_buf: Vec<u8>,
-    body_rewritten: bool,
+    /// Fully-rewritten request body (the `model` field swapped to the provider
+    /// model name), serialized once in request_filter. request_body_filter just
+    /// swaps these bytes onto the wire — no second parse/serialize.
+    rewritten_body: Option<Bytes>,
     provider_base_url: Option<String>,
     provider_name: Option<String>,
     provider_key: Option<String>,
@@ -213,6 +216,56 @@ impl LlmGateway {
             ctx.upstream_port = u.port_or_known_default();
         }
     }
+
+    /// Serve an OpenAI-compatible `GET /v1/models` response built from the
+    /// cached epichust model names. Requires a valid bearer key so a platform's
+    /// "test connection" both discovers models and validates credentials
+    /// (mirrors OpenAI, where `/v1/models` is authenticated).
+    async fn respond_models(&self, session: &mut Session) -> Result<bool> {
+        let authorized = session
+            .req_header()
+            .headers
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_bearer_token)
+            .map(hash_api_key)
+            .map(|h| {
+                self.cache
+                    .read()
+                    .map(|g| g.key_hashes.contains_key(&h))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if !authorized {
+            self.auth_failures_total.inc();
+            return respond_json(
+                session,
+                401,
+                json!({"error":{"message":"missing or invalid bearer token","type":"authentication_error"}}),
+            )
+            .await;
+        }
+
+        let created = chrono::Utc::now().timestamp();
+        let mut ids: Vec<String> = self
+            .cache
+            .read()
+            .map(|g| g.model_routes.keys().cloned().collect())
+            .unwrap_or_default();
+        ids.sort();
+        let data: Vec<serde_json::Value> = ids
+            .into_iter()
+            .map(|id| {
+                json!({
+                    "id": id,
+                    "object": "model",
+                    "created": created,
+                    "owned_by": "epichust",
+                })
+            })
+            .collect();
+        respond_json(session, 200, json!({"object": "list", "data": data})).await
+    }
 }
 
 #[async_trait]
@@ -234,8 +287,7 @@ impl ProxyHttp for LlmGateway {
             model: None,
             upstream_model: None,
             stream: None,
-            body_buf: Vec::new(),
-            body_rewritten: false,
+            rewritten_body: None,
             provider_base_url: None,
             provider_name: None,
             provider_key: None,
@@ -254,6 +306,10 @@ impl ProxyHttp for LlmGateway {
                 json!({"status":"ok","service":"pingora-gateway"}),
             )
             .await;
+        }
+        if MODELS_PATHS.contains(&path) {
+            ctx.audit_enabled = false;
+            return self.respond_models(session).await;
         }
         if path != CHAT_COMPLETIONS_PATH {
             return respond_json(
@@ -315,9 +371,12 @@ impl ProxyHttp for LlmGateway {
             .read()
             .ok()
             .and_then(|c| c.rate_limits.get(&key_hash).cloned());
+        // Only keys with limits configured touch the rate-limiter lock at all.
         if let Some(config) = rate_config {
             if !config.is_empty() {
-                if let Some(msg) = check_rate_limit(&self.rate_limits, &key_hash, &config) {
+                if let Some(msg) =
+                    check_and_record_rate_limit(&self.rate_limits, &key_hash, &config)
+                {
                     ctx.reject_reason = Some(msg.clone());
                     return respond_json(
                         session,
@@ -328,9 +387,6 @@ impl ProxyHttp for LlmGateway {
                 }
             }
         }
-
-        // Record request in rate limiter (tokens=0 for now; updated in response if possible)
-        record_rate_limit(&self.rate_limits, &key_hash, 0);
 
         // Content-based routing: choose the provider from the request's `model`
         // BEFORE upstream_peer opens the connection. Enable retry buffering first
@@ -349,7 +405,10 @@ impl ProxyHttp for LlmGateway {
                 .await;
             }
         }
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) {
+        // Parse the body once here; the parsed value is reused below to rewrite
+        // the `model` field, so request_body_filter never parses/serializes again.
+        let mut parsed = serde_json::from_slice::<serde_json::Value>(&raw).ok();
+        if let Some(ref value) = parsed {
             let model = value
                 .get("model")
                 .and_then(|m| m.as_str())
@@ -391,6 +450,27 @@ impl ProxyHttp for LlmGateway {
             .await;
         }
 
+        // Precompute the rewritten body ONCE: swap `model` → the chosen provider
+        // model name on the already-parsed value, serialize a single time, and pad
+        // to the original length so Content-Length stays valid. request_body_filter
+        // then only swaps these bytes onto the wire.
+        if let (Some(upstream_model), Some(mut value)) =
+            (ctx.upstream_model.clone(), parsed.take())
+        {
+            value["model"] = serde_json::Value::String(upstream_model.clone());
+            let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
+            while new_body.len() < raw.len() {
+                new_body.push(b' ');
+            }
+            ctx.rewritten_body = Some(Bytes::from(new_body));
+            log::info!(
+                "model routed: '{}' → '{}' (provider {})",
+                ctx.model.as_deref().unwrap_or(""),
+                upstream_model,
+                ctx.provider_name.as_deref().unwrap_or("")
+            );
+        }
+
         ctx.auth_result = AuthResult::Ok;
         ctx.counted_active = true;
         self.active_requests.inc();
@@ -407,35 +487,17 @@ impl ProxyHttp for LlmGateway {
     where
         Self::CTX: Send + Sync,
     {
-        if let Some(ref data) = body {
-            ctx.body_buf.extend_from_slice(data);
-        }
-        if !end_of_stream || ctx.body_rewritten || ctx.body_buf.is_empty() {
+        // The rewritten body was built once in request_filter. Suppress the
+        // original streamed chunks and emit the full rewritten body at EOS.
+        // Nothing to rewrite (e.g. non-JSON body) → forward untouched.
+        if ctx.rewritten_body.is_none() {
             return Ok(());
         }
-
-        // Rewrite the request's `model` to the provider model chosen in
-        // request_filter. The route was decided there (so the upstream peer
-        // matches); here we only apply the agreed-on translation.
-        let Some(upstream_model) = ctx.upstream_model.clone() else {
-            return Ok(());
+        *body = if end_of_stream {
+            ctx.rewritten_body.take()
+        } else {
+            None
         };
-        if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_buf) {
-            value["model"] = serde_json::Value::String(upstream_model.clone());
-            let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
-            // Pad to original length so Content-Length stays valid.
-            while new_body.len() < ctx.body_buf.len() {
-                new_body.push(b' ');
-            }
-            *body = Some(Bytes::from(new_body));
-            ctx.body_rewritten = true;
-            log::info!(
-                "model routed: '{}' → '{}' (provider {})",
-                ctx.model.as_deref().unwrap_or(""),
-                upstream_model,
-                ctx.provider_name.as_deref().unwrap_or("")
-            );
-        }
         Ok(())
     }
 
@@ -451,7 +513,27 @@ impl ProxyHttp for LlmGateway {
             .map(|u| u.starts_with("https://"))
             .unwrap_or(true);
         let port = ctx.upstream_port.unwrap_or(if tls { 443 } else { 80 });
-        Ok(Box::new(HttpPeer::new((host, port), tls, host.to_owned())))
+        let mut peer = HttpPeer::new((host, port), tls, host.to_owned());
+        // Connection tuning to cut forwarding latency / tail latency:
+        // - bound the cold connect+TLS phase so a stuck handshake fails fast
+        //   instead of hanging the request;
+        // - TCP keepalive keeps pooled upstream connections alive through NAT /
+        //   firewall idle timeouts, so the next request reuses a warm connection
+        //   (skipping the TLS handshake) and we hit fewer dead-connection reuses.
+        // NOTE: deliberately NOT setting read_timeout — LLM/SSE responses (and
+        // slow-reasoning first tokens) can run for minutes; a read timeout would
+        // sever long streams mid-response.
+        peer.options.connection_timeout = Some(Duration::from_secs(5));
+        peer.options.total_connection_timeout = Some(Duration::from_secs(10));
+        peer.options.tcp_keepalive = Some(TcpKeepalive {
+            idle: Duration::from_secs(60),
+            interval: Duration::from_secs(15),
+            count: 3,
+            // Linux-only field; 0 = use the system default for TCP_USER_TIMEOUT.
+            #[cfg(target_os = "linux")]
+            user_timeout: Duration::from_secs(0),
+        });
+        Ok(Box::new(peer))
     }
 
     async fn upstream_request_filter(

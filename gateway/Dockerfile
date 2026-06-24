@@ -30,7 +30,7 @@ FROM debian:trixie-slim
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates libssl3
+        ca-certificates curl libssl3
 
 COPY --from=builder /usr/local/bin/pingora-gateway /usr/local/bin/pingora-gateway
 

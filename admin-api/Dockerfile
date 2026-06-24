@@ -30,7 +30,7 @@ FROM debian:trixie-slim
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates
+        ca-certificates curl
 
 COPY --from=builder /usr/local/bin/axum-admin-api /usr/local/bin/axum-admin-api
 

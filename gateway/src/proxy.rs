@@ -24,6 +24,7 @@ use crate::config::GatewayConfig;
 use crate::db::{Cache, ModelTarget, RateLimitConfig, RouteCandidate, RoutingStrategy};
 
 const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+const MAX_REQUEST_BODY: usize = 4 * 1024 * 1024;
 
 // ── Rate limiter ──────────────────────────────────────────────────
 
@@ -112,6 +113,9 @@ pub struct RequestContext {
     key_hash: Option<String>,
     key_hash_prefix: Option<String>,
     model: Option<String>,
+    /// Provider model name to rewrite the request's `model` to (decided once,
+    /// in request_filter, so request_body_filter doesn't re-roll the route).
+    upstream_model: Option<String>,
     stream: Option<bool>,
     body_buf: Vec<u8>,
     body_rewritten: bool,
@@ -186,6 +190,19 @@ impl LlmGateway {
         };
         Some(chosen.clone())
     }
+
+    /// Point the context at a chosen route: the upstream provider (host/key) and
+    /// the provider model name the request's `model` should be rewritten to.
+    fn apply_route(&self, ctx: &mut RequestContext, route: &RouteCandidate) {
+        ctx.upstream_model = Some(route.provider_model_name.clone());
+        ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
+        ctx.provider_name = Some(route.provider.provider_name.clone());
+        ctx.provider_key = Some(route.provider.provider_key.clone());
+        if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
+            ctx.upstream_host = u.host_str().map(|h| h.to_owned());
+            ctx.upstream_port = u.port_or_known_default();
+        }
+    }
 }
 
 #[async_trait]
@@ -203,6 +220,7 @@ impl ProxyHttp for LlmGateway {
             key_hash: None,
             key_hash_prefix: None,
             model: None,
+            upstream_model: None,
             stream: None,
             body_buf: Vec::new(),
             body_rewritten: false,
@@ -300,21 +318,53 @@ impl ProxyHttp for LlmGateway {
         // Record request in rate limiter (tokens=0 for now; updated in response if possible)
         record_rate_limit(&self.rate_limits, &key_hash, 0);
 
-        // Resolve provider (will be refined in body filter if model matches a policy)
-        if let Ok(cache) = self.cache.read() {
-            if let Some(route) = cache
-                .model_routes
-                .values()
-                .next()
-                .and_then(|target| target.routes.first())
-            {
-                ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
-                ctx.provider_name = Some(route.provider.provider_name.clone());
-                ctx.provider_key = Some(route.provider.provider_key.clone());
-                if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
-                    ctx.upstream_host = u.host_str().map(|h| h.to_owned());
-                    ctx.upstream_port = u.port_or_known_default();
+        // Content-based routing: choose the provider from the request's `model`
+        // BEFORE upstream_peer opens the connection. Enable retry buffering first
+        // so the body we read here is retained and replayed to the upstream by
+        // the framework (and rewritten in request_body_filter).
+        session.enable_retry_buffering();
+        let mut raw = Vec::new();
+        while let Ok(Some(chunk)) = session.read_request_body().await {
+            raw.extend_from_slice(&chunk);
+            if raw.len() > MAX_REQUEST_BODY {
+                return respond_json(
+                    session,
+                    413,
+                    json!({"error":{"message":"request body too large","type":"invalid_request_error"}}),
+                )
+                .await;
+            }
+        }
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) {
+            let model = value
+                .get("model")
+                .and_then(|m| m.as_str())
+                .unwrap_or("")
+                .to_owned();
+            ctx.stream = value.get("stream").and_then(|s| s.as_bool());
+            if !model.is_empty() {
+                ctx.model = Some(model.clone());
+                let selected = self.cache.read().ok().and_then(|cache| {
+                    cache
+                        .model_routes
+                        .get(&model)
+                        .and_then(|target| self.select_route(&model, target, &ctx.request_id))
+                });
+                if let Some(route) = selected {
+                    self.apply_route(ctx, &route);
                 }
+            }
+        }
+        // No policy for this model — fall back to the first available route so
+        // un-mapped requests still reach an upstream (legacy behaviour).
+        if ctx.provider_base_url.is_none() {
+            let first = self
+                .cache
+                .read()
+                .ok()
+                .and_then(|cache| cache.model_routes.values().next()?.routes.first().cloned());
+            if let Some(route) = first {
+                self.apply_route(ctx, &route);
             }
         }
 
@@ -350,48 +400,27 @@ impl ProxyHttp for LlmGateway {
             return Ok(());
         }
 
+        // Rewrite the request's `model` to the provider model chosen in
+        // request_filter. The route was decided there (so the upstream peer
+        // matches); here we only apply the agreed-on translation.
+        let Some(upstream_model) = ctx.upstream_model.clone() else {
+            return Ok(());
+        };
         if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&ctx.body_buf) {
-            let model = value
-                .get("model")
-                .and_then(|m| m.as_str())
-                .unwrap_or("")
-                .to_owned();
-            ctx.model = Some(model.clone());
-            ctx.stream = value.get("stream").and_then(|s| s.as_bool());
-
-            if !model.is_empty() {
-                // Select one upstream per the policy's routing strategy.
-                let selected = self.cache.read().ok().and_then(|cache| {
-                    cache
-                        .model_routes
-                        .get(&model)
-                        .and_then(|target| self.select_route(&model, target, &ctx.request_id))
-                });
-                if let Some(route) = selected {
-                    // Replace the model name in the parsed JSON value
-                    value["model"] = serde_json::Value::String(route.provider_model_name.clone());
-                    let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
-                    // Pad to original length so Content-Length stays valid
-                    while new_body.len() < ctx.body_buf.len() {
-                        new_body.push(b' ');
-                    }
-                    *body = Some(Bytes::from(new_body));
-                    ctx.body_rewritten = true;
-                    log::info!(
-                        "model translated: '{model}' → '{}' (provider {})",
-                        route.provider_model_name,
-                        route.provider.provider_name
-                    );
-
-                    ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
-                    ctx.provider_name = Some(route.provider.provider_name.clone());
-                    ctx.provider_key = Some(route.provider.provider_key.clone());
-                    if let Ok(u) = url::Url::parse(&route.provider.provider_base_url) {
-                        ctx.upstream_host = u.host_str().map(|h| h.to_owned());
-                        ctx.upstream_port = u.port_or_known_default();
-                    }
-                }
+            value["model"] = serde_json::Value::String(upstream_model.clone());
+            let mut new_body = serde_json::to_vec(&value).unwrap_or_default();
+            // Pad to original length so Content-Length stays valid.
+            while new_body.len() < ctx.body_buf.len() {
+                new_body.push(b' ');
             }
+            *body = Some(Bytes::from(new_body));
+            ctx.body_rewritten = true;
+            log::info!(
+                "model routed: '{}' → '{}' (provider {})",
+                ctx.model.as_deref().unwrap_or(""),
+                upstream_model,
+                ctx.provider_name.as_deref().unwrap_or("")
+            );
         }
         Ok(())
     }
@@ -422,6 +451,17 @@ impl ProxyHttp for LlmGateway {
         }
         if let Some(ref key) = ctx.provider_key {
             upstream_request.insert_header("Authorization", format!("Bearer {key}"))?;
+        }
+        // Honour the provider base-url's path prefix. If the base url carries a
+        // path (e.g. DashScope's `/compatible-mode/v1`), the upstream endpoint is
+        // `<base path>/chat/completions`; if it has none (e.g. DeepSeek's bare
+        // host), keep the incoming `/v1/chat/completions`.
+        if let Some(base) = ctx.provider_base_url.as_ref().and_then(|b| url::Url::parse(b).ok()) {
+            let base_path = base.path().trim_end_matches('/');
+            if !base_path.is_empty() {
+                let upstream_path = format!("{base_path}/chat/completions");
+                let _ = upstream_request.set_raw_path(upstream_path.as_bytes());
+            }
         }
         Ok(())
     }

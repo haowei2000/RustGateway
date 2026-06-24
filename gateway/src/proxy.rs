@@ -20,6 +20,9 @@ use prometheus::{
 use serde_json::json;
 use uuid::Uuid;
 
+use tokio::sync::mpsc;
+
+use crate::audit_writer::AuditRow;
 use crate::config::GatewayConfig;
 use crate::db::{Cache, ModelTarget, RateLimitConfig, RouteCandidate, RoutingStrategy};
 
@@ -96,6 +99,8 @@ pub struct LlmGateway {
     rate_limits: RateLimitStore,
     /// epichust_model_name → round-robin cursor (survives cache refreshes)
     rr_counters: Arc<Mutex<HashMap<String, u64>>>,
+    /// Bounded sender to the background audit writer (None when no DB configured).
+    audit_tx: Option<mpsc::Sender<AuditRow>>,
     requests_total: IntCounter,
     auth_failures_total: IntCounter,
     upstream_errors_total: IntCounter,
@@ -112,6 +117,8 @@ pub struct RequestContext {
     reject_reason: Option<String>,
     key_hash: Option<String>,
     key_hash_prefix: Option<String>,
+    api_key_id: Option<String>,
+    provider_id: Option<String>,
     model: Option<String>,
     /// Provider model name to rewrite the request's `model` to (decided once,
     /// in request_filter, so request_body_filter doesn't re-roll the route).
@@ -130,11 +137,13 @@ impl LlmGateway {
     pub fn new(
         _config: Arc<GatewayConfig>,
         cache: Cache,
+        audit_tx: Option<mpsc::Sender<AuditRow>>,
     ) -> std::result::Result<Self, prometheus::Error> {
         Ok(Self {
             cache,
             rate_limits: Arc::new(RwLock::new(HashMap::new())),
             rr_counters: Arc::new(Mutex::new(HashMap::new())),
+            audit_tx,
             requests_total: register_int_counter!("gateway_requests_total", "Total requests")?,
             auth_failures_total: register_int_counter!(
                 "gateway_auth_failures_total",
@@ -195,6 +204,7 @@ impl LlmGateway {
     /// the provider model name the request's `model` should be rewritten to.
     fn apply_route(&self, ctx: &mut RequestContext, route: &RouteCandidate) {
         ctx.upstream_model = Some(route.provider_model_name.clone());
+        ctx.provider_id = Some(route.provider.provider_id.clone());
         ctx.provider_base_url = Some(route.provider.provider_base_url.clone());
         ctx.provider_name = Some(route.provider.provider_name.clone());
         ctx.provider_key = Some(route.provider.provider_key.clone());
@@ -219,6 +229,8 @@ impl ProxyHttp for LlmGateway {
             reject_reason: None,
             key_hash: None,
             key_hash_prefix: None,
+            api_key_id: None,
+            provider_id: None,
             model: None,
             upstream_model: None,
             stream: None,
@@ -279,12 +291,13 @@ impl ProxyHttp for LlmGateway {
         let key_hash = hash_api_key(token);
         ctx.key_hash_prefix = Some(hash_prefix(&key_hash));
         ctx.key_hash = Some(key_hash.clone());
-        if !self
+        // Look up the key id (membership = valid key); used for audit attribution.
+        let key_id = self
             .cache
             .read()
-            .map(|g| g.key_hashes.contains(&key_hash))
-            .unwrap_or(false)
-        {
+            .ok()
+            .and_then(|g| g.key_hashes.get(&key_hash).cloned());
+        let Some(key_id) = key_id else {
             ctx.auth_result = AuthResult::InvalidKey;
             self.auth_failures_total.inc();
             return respond_json(
@@ -293,7 +306,8 @@ impl ProxyHttp for LlmGateway {
                 json!({"error":{"message":"invalid key","type":"permission_error"}}),
             )
             .await;
-        }
+        };
+        ctx.api_key_id = Some(key_id);
 
         // Check rate limits (clone config to drop read lock before await)
         let rate_config = self
@@ -456,7 +470,11 @@ impl ProxyHttp for LlmGateway {
         // path (e.g. DashScope's `/compatible-mode/v1`), the upstream endpoint is
         // `<base path>/chat/completions`; if it has none (e.g. DeepSeek's bare
         // host), keep the incoming `/v1/chat/completions`.
-        if let Some(base) = ctx.provider_base_url.as_ref().and_then(|b| url::Url::parse(b).ok()) {
+        if let Some(base) = ctx
+            .provider_base_url
+            .as_ref()
+            .and_then(|b| url::Url::parse(b).ok())
+        {
             let base_path = base.path().trim_end_matches('/');
             if !base_path.is_empty() {
                 let upstream_path = format!("{base_path}/chat/completions");
@@ -518,6 +536,35 @@ impl ProxyHttp for LlmGateway {
         };
         if let Ok(line) = serde_json::to_string(&event) {
             log::info!("{line}");
+        }
+
+        // Persist to the audit_logs table via the non-blocking background writer.
+        if let Some(tx) = &self.audit_tx {
+            let auth_result = serde_json::to_value(&ctx.auth_result)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "unknown".to_owned());
+            let row = AuditRow {
+                request_id: ctx.request_id,
+                api_key_id: ctx.api_key_id.clone(),
+                epichust_model_name: ctx.model.clone(),
+                provider_id: ctx.provider_id.clone(),
+                provider_model_name: ctx.upstream_model.clone(),
+                client_ip: session.client_addr().map(|a| a.to_string()),
+                method: session.req_header().method.to_string(),
+                path: session.req_header().uri.path().to_owned(),
+                stream: ctx.stream,
+                status_code: i32::from(sc),
+                auth_result,
+                reject_reason: ctx.reject_reason.clone(),
+                upstream_host: ctx.provider_base_url.clone(),
+                latency_ms: latency.as_millis() as i64,
+                created_at: event.created_at,
+            };
+            // try_send never blocks; drop the row if the writer is far behind.
+            if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(row) {
+                log::warn!("audit writer channel full; dropping audit row");
+            }
         }
     }
 }

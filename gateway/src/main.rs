@@ -1,3 +1,4 @@
+mod audit_writer;
 mod config;
 mod db;
 mod proxy;
@@ -5,6 +6,7 @@ mod proxy;
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+use audit_writer::start_audit_writer;
 use config::GatewayConfig;
 use db::{new_cache, start_db_thread};
 use pingora_core::{server::configuration::Opt, server::Server, services::listening::Service};
@@ -15,10 +17,12 @@ fn main() -> Result<()> {
 
     let config = Arc::new(GatewayConfig::from_env()?);
     let cache = new_cache();
+    let mut audit_tx = None;
 
     if let Some(ref database_url) = config.database_url {
         start_db_thread(cache.clone(), database_url, Duration::from_secs(5));
-        log::info!("DB thread started, waiting for initial cache load...");
+        audit_tx = Some(start_audit_writer(database_url));
+        log::info!("DB thread + audit writer started, waiting for initial cache load...");
         // Brief wait for the thread to connect and load
         std::thread::sleep(Duration::from_secs(2));
     } else {
@@ -38,7 +42,7 @@ fn main() -> Result<()> {
 
     let mut gateway = pingora_proxy::http_proxy_service(
         &server.configuration,
-        LlmGateway::new(config.clone(), cache)?,
+        LlmGateway::new(config.clone(), cache, audit_tx)?,
     );
     gateway.add_tcp(&config.bind_addr);
     server.add_service(gateway);

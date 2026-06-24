@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -11,6 +11,7 @@ use sqlx::{PgPool, Row};
 
 #[derive(Debug, Clone)]
 pub struct ProviderInfo {
+    pub provider_id: String,
     pub provider_name: String,
     pub provider_base_url: String,
     pub provider_key: String,
@@ -70,7 +71,8 @@ impl RateLimitConfig {
 }
 
 pub struct GatewayCache {
-    pub key_hashes: HashSet<String>,
+    /// key_hash → api_key id (membership = valid key; value used for audit)
+    pub key_hashes: HashMap<String, String>,
     /// epichust_model_name → all enabled routes + the policy's routing strategy
     pub model_routes: HashMap<String, ModelTarget>,
     /// key_hash → aggregated rate limit rules from attached policies
@@ -81,7 +83,7 @@ pub type Cache = Arc<RwLock<GatewayCache>>;
 
 pub fn new_cache() -> Cache {
     Arc::new(RwLock::new(GatewayCache {
-        key_hashes: HashSet::new(),
+        key_hashes: HashMap::new(),
         model_routes: HashMap::new(),
         rate_limits: HashMap::new(),
     }))
@@ -89,14 +91,17 @@ pub fn new_cache() -> Cache {
 
 // ── DB queries ────────────────────────────────────────────────────
 
-async fn load_key_hashes(pool: &PgPool) -> Result<HashSet<String>> {
-    let rows = sqlx::query("SELECT key_hash FROM epichust_api_keys WHERE enabled = true")
+async fn load_key_hashes(pool: &PgPool) -> Result<HashMap<String, String>> {
+    let rows = sqlx::query("SELECT id, key_hash FROM epichust_api_keys WHERE enabled = true")
         .fetch_all(pool)
         .await?;
-    Ok(rows
-        .iter()
-        .map(|r| r.try_get::<String, _>("key_hash").unwrap())
-        .collect())
+    let mut map = HashMap::with_capacity(rows.len());
+    for r in &rows {
+        let hash: String = r.try_get("key_hash")?;
+        let id: String = r.try_get("id")?;
+        map.insert(hash, id);
+    }
+    Ok(map)
 }
 
 /// Load every enabled route for every enabled policy, grouped by epichust
@@ -109,6 +114,7 @@ async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelTarget>
         SELECT
             em.model_name AS epichust_model_name,
             pm.model_name AS provider_model_name,
+            p.id AS provider_id,
             p.provider_name,
             p.provider_base_url,
             p.provider_key_ciphertext,
@@ -139,6 +145,7 @@ async fn load_model_routes(pool: &PgPool) -> Result<HashMap<String, ModelTarget>
             weight: weight.max(0) as u32,
             priority: priority.max(0) as u32,
             provider: ProviderInfo {
+                provider_id: row.try_get("provider_id")?,
                 provider_name: row.try_get("provider_name")?,
                 provider_base_url: row.try_get("provider_base_url")?,
                 provider_key: String::from_utf8_lossy(&ciphertext).into_owned(),

@@ -40,6 +40,54 @@ kubectl port-forward svc/admin-api 9000:9000 &
 kubectl port-forward svc/admin-web 3000:80 &
 ```
 
+### Production deploy (Harbor + VPS, manual)
+
+The live deploy is a manual flow: **build locally → push to Harbor → pull on the server → (edit config if needed) → restart**. The GitHub Actions workflow exists but the day-to-day path is the steps below.
+
+Facts:
+- **Harbor registry**: `47.99.42.4:5000`; images `rustgateway/gateway`, `rustgateway/admin-api`, `rustgateway/admin-web` (the local Docker daemon is already logged in — re-run `docker login 47.99.42.4:5000` if a push 401s).
+- **Server**: SSH host `aliyun1`, deploy dir `/opt/llm-gateway/deploy`, Compose project `deploy`, files `docker-compose-vps.yml` + server-local override `docker-compose-aliyun.yml`.
+- **Arch**: local dev machine is arm64, the server is amd64 — always build `--platform linux/amd64`, or the container won't start.
+- Gateway is published on the server at `127.0.0.1:18080` (host 8080 is taken by another stack); public entry is `https://llm.epichust.com` via the host nginx.
+
+**1. Build + push from the workspace root** (context is the repo root for all three images):
+```bash
+# gateway (repeat with the other Dockerfiles/names as needed)
+docker buildx build --platform linux/amd64 \
+  -f gateway/Dockerfile \
+  -t 47.99.42.4:5000/rustgateway/gateway:latest \
+  --push .
+
+# admin-api
+docker buildx build --platform linux/amd64 \
+  -f admin-api/Dockerfile \
+  -t 47.99.42.4:5000/rustgateway/admin-api:latest --push .
+
+# admin-web
+docker buildx build --platform linux/amd64 \
+  -f admin-web/Dockerfile \
+  -t 47.99.42.4:5000/rustgateway/admin-web:latest --push .
+```
+
+**2. Pull + restart on the server** (only the changed service; confirm the exact `-f` files with `docker compose ls`):
+```bash
+ssh aliyun1 'cd /opt/llm-gateway/deploy && \
+  docker compose -f docker-compose-vps.yml -f docker-compose-aliyun.yml pull gateway && \
+  docker compose -f docker-compose-vps.yml -f docker-compose-aliyun.yml up -d gateway'
+```
+
+**3. (If config changed)** edit env/ports in `docker-compose-vps.yml` (or the server-local `docker-compose-aliyun.yml`) on the server first; a plain `up -d <svc>` recreates the container so the new config takes effect.
+
+**4. Verify**:
+```bash
+ssh aliyun1 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18080/healthz'  # expect 200
+ssh aliyun1 'docker logs --tail 50 deploy-gateway-1'
+```
+
+Notes:
+- `:latest` is what Compose pulls; also tag with a short SHA (`...:gateway:abc1234`) when you want a rollback target.
+- After `pull`, an unchanged image is a no-op; if the digest didn't move, your push didn't land — re-check the build/push step.
+
 ### Rust (workspace root)
 ```bash
 cargo fmt --all
